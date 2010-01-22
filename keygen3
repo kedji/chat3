@@ -1,0 +1,57 @@
+#!/usr/bin/env ruby
+
+# Programatic interface to the RSA key generator for Chat 3.0.
+# Writes keys to ruby file installed in ~/.sechat/address_book.rb
+# Last revision:  Dec 3, 2009
+
+$LOAD_PATH.unshift File.dirname(__FILE__)
+
+BITS = 2408
+require "rsa.rb"
+require 'fileutils'
+require 'md5'
+
+# File storage directory (user and server)
+#FILE_DIRECTORY = (File.join(File.expand_path('~'), '.sechat') rescue '.')
+FILE_DIRECTORY = '.'
+
+# Make sure they specify a username
+if ARGV.length != 1
+  $stderr.puts "Usage: #{$0} <username>"
+  Kernel.exit
+end
+
+# Make sure the directory exists
+FileUtils::mkdir FILE_DIRECTORY rescue nil
+
+# Warn if they're about to overwrite their key
+if File.exists?("#{FILE_DIRECTORY}/address_book.rb")
+  raise "You already have a key in #{FILE_DIRECTORY}/address_book.rb"
+end
+
+# Make the key pair
+$stderr.puts 'Making keys, this will take a while...'
+pub, prv = Key.keygen(BITS)
+fingerprint = []
+MD5::digest(pub.to_s)[0,8].each_byte { |x| fingerprint << ("%02x" % x) }
+fingerprint = fingerprint.join(' ')
+
+# Output the keys to the rsa_keys file
+begin 
+  kf = File.new("#{FILE_DIRECTORY}/address_book.rb",
+                File::CREAT|File::TRUNC|File::WRONLY, 0600)
+  kf.puts("# Chat client RSA keys.  KEEP THIS PRIVATE!\n\n")
+  kf.puts("RSA_ADDRESS_BOOK = {")
+  kf.puts("  :name => '#{ARGV[0]}',")
+  kf.puts("  :pub => '#{pub.to_s}',")
+  kf.puts("  :prv => '#{prv.to_s}',")
+  kf.puts("}")
+  kf.close
+rescue
+  puts "Could not write to keyfile; aborting."
+  Kernel.exit
+end
+
+# Just print them to stdout
+$stderr.puts "Completed!  You can now run Chat 3.0."
+$stderr.puts "\nYour key fingerprint is #{fingerprint}.\n\n"

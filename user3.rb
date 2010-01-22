@@ -1,0 +1,673 @@
+# Copyright notice:
+#  (C) 2009-2010
+# This software is provided 'as-is' without any express or implied warranty.
+# In no event will the authors be held liable for damages arising from the
+# use of this software.  All license is reserved.
+
+
+# Okay.  Now this is where shit gets really interesting.  Add any method
+# definitions you wish inside this file.  They will get defined at
+# RUN TIME.  Any method you insert here will be able to respond to
+# "/cmd arg1 arg2" commands from the prompt.  All methods here should accept
+# a single array param, ie:  def my_method(*args).  Raise exceptions to exit
+# gracefully.
+#
+# Prepend "local_" to local /command definitions
+# Prepend "remote_" to remote control handlers
+# Event handlers are all already defined.
+# Prepend "_" to helper methods
+# Events will be prepended with "event_"
+#
+# Useful internal methods:
+#   add_msg(msg)              - print a message to the local user
+#   add_error(msg)            - print an error message to the local user
+#   load_command_methods      - loads methods defined here
+#   @connection.chat_msg      - send a chat message to all users
+#   @connection.send_command  - send a command to all users or to one user:
+#                               send_command(cmd_string) - all users
+#                               send_command(cmd_string, name) - one user   
+#   dispatch(:event, *args)   - send an event
+#
+# Useful internal variables:
+#   @cmds                  - list of names of the methods defined here
+#   @var                   - a hash where you can story any variable you like
+#                            (please use :symbols)
+
+# All definitions will be associated with this object:
+class Chat3
+
+# Put your definitions below this line:
+# --------------------------------------------------------------------------
+
+
+# Print a notice to the screen.  Types are :notice, :global, :crypto, :error.
+# If type is String instance, it is a room name and the notice belongs to
+# that room.
+def _notice(msg, type = :notice)
+  if type == :error
+    add_error(msg)
+  else
+    add_msg("* #{msg}", type)
+  end
+end
+
+
+# We're resetting all of our network state for a reconnection
+def _network_init
+  # Flush out all blacklisted state
+  @var[:blacklist_env].each { |rm| @var.delete rm unless rm == :blacklist_env }
+
+  # Add the key hashes
+  @var[:user_keys].each do |name, key|
+    keyhash = MD5::digest(key)[0,8]
+    @connection.comm.rsa_keys[name] = key
+    @connection.comm.names[keyhash] = name
+  end
+  @var[:our_name] = @var[:our_name] || @connection.comm.rsa_keys[:name]
+  @connection.comm.rsa_keys[:name] = @var[:our_name]
+  @connection.comm.rsa_keys[@var[:our_name]] = @connection.comm.rsa_keys[:pub]
+  @connection.comm.names[@connection.comm.our_keyhash] = @var[:our_name]
+
+  # Keys and access
+  @var[:granted] = [ @var[:our_name] ]
+  @var[:granted_by] = [ @var[:our_name] ]
+  @var[:revoked] ||= []
+
+  # Chat rooms and presense
+  @var[:room] = 'chat'        # current room
+  @var[:membership] = {}      # maps room-name to known room members' keyhashes
+  @var[:presence] = {}        # maps peer keyhash to presence + salutation
+  @var[:membership][EMPTY_ROOM] = [ @connection.comm.our_keyhash ]
+  @var[:presence][@connection.comm.our_keyhash] = [ 'offline', '' ]
+end
+
+
+# A user's presense is being adjusted.  Valid operations are:
+#  [ 'join', 'leave', 'away', 'back', 'online', 'offline' ]
+# Params:
+#  - op:       operation from the list given above
+#  - peer:     public key hash of peer
+#  - room:     local string name of room (only for join and leave)
+#  - msg:      user's custom salutation (may be blank)
+#  - notify:   print a _notice() notification?
+# Returns: [ peer_name, op, status, room ]
+def _adjust_presence(op, peer_keyhash, room, msg, notify = true)
+  peer_name = _user_name(peer_keyhash)
+  room = nil unless op == 'leave' or op == 'join'
+
+  # Find the prior and current presence state
+  prior = (@var[:presence][peer_keyhash] || []).first
+  current = prior
+  current = 'online' if op == 'online' or op == 'back'
+  current = 'away' if op == 'away'
+
+  # Find the new salutation for this user
+  status = (@var[:presence][peer_keyhash] || []).last.to_s
+  status = msg if [ 'away', 'back', 'online' ].include?(op) or msg.length > 0
+  msg = ''
+  msg = ": #{status}" if status.length > 0
+
+  # Special case - logging off means leaving every chat room implicitly
+  if op == 'offline'
+    @var[:membership].each { |_,r| r.delete peer_keyhash }
+  end
+
+  # Update the presence state
+  @var[:presence][peer_keyhash] = [ current, status ]
+
+  # Notify the user if so instructed
+  if (notify)
+    if room
+      _notice "#{peer_name} has #{op == 'join' ? 'joined' : 'left'}" +
+              " room #{room}.", room
+    elsif op == 'offline'
+      _notice "#{peer_name} has disconnected#{msg}", :notice
+    elsif op == 'away' and prior != current
+      _notice "#{peer_name} is away#{msg}", :notice
+    elsif op == 'back' or current == 'online' and prior != current
+      _notice "#{peer_name} is back#{msg}", :notice
+    end
+  end
+  return [ peer_name, op, status, room ]
+end
+
+
+# Fine a user's name by their keyhash and vice-versa
+def _user_name(kh)
+  @connection.comm.sender_name(kh) || 'unknown_user'
+end
+def _user_keyhash(name)
+  @connection.comm.sender_keyhash(name)
+end
+
+
+# Open a file; report only initial failures (don't want to bug the user).
+# Create the containing directory if it does not exist
+def _open_sefile(filename, *args)
+  require 'ftools'
+  ret = nil
+  fname = FILE_DIRECTORY
+  begin
+    File.makedirs FILE_DIRECTORY unless File.exist? FILE_DIRECTORY
+    fname = File.join(FILE_DIRECTORY, filename)
+    ret = File.open(fname, *args) { |f| yield f }
+    @var.delete :file_open_raised
+  rescue Errno::ENOENT
+  rescue
+    already_raised = @var[:file_open_raised]
+    @var[:file_open_raised] = true
+    raise "could not open file \"#{fname}\"" unless already_raised
+  end
+  ret
+end
+
+
+# Save our environment variables, except those that are blacklisted
+def _save_env
+  require 'yaml'
+  w_var = @var.dup
+  @var[:blacklist_env].each { |b| w_var.delete b } if @var[:blacklist_env]
+  _open_sefile('env3.yml', 'w') { |f| YAML.dump(w_var, f) }
+end
+
+
+# Load our environment variables
+def _load_env
+  require 'yaml'
+  r_var = _open_sefile('env3.yml') { |f| YAML.load(f) }
+  @var.delete :file_open_raised
+  r_var.each { |k,v| @var[k] = v } if r_var
+end
+
+
+# Send a remote control to a provided user, optionally with RSA.  Set peer
+# to nil to deliver a remote control to the whole room.
+def _remote_control(peer, command, body, use_rsa = false)
+  raise "Invalid user, #{peer}" if (peer or use_rsa) and not _user_keyhash(peer)
+  if use_rsa
+    @connection.comm.send_private_command("#{command} #{body}", peer)
+  else
+    peer = _user_keyhash(peer) if peer
+    @connection.comm.send_command("#{command} #{body}", peer)
+  end
+end
+
+
+# Send a remote control to the server
+def _server_control(command, body = nil)
+  @connection.comm.server_message("#{command} #{body}")
+end
+
+
+# Pull tokens off the beginning of a block of text, leaving the remaining
+# block otherwise the same.
+def _pop_token(body)
+  indx = body.index(' ') || body.length
+  token = body[0...indx]
+  body[0..indx] = ''
+  return token
+end
+
+
+# Send a remote control to the provided user.  Arguments are:  recipient name,
+# command, contents.
+def local_remote_control(body)
+  peer = _pop_token(body)
+  command = _pop_token(body)
+  _remote_control(peer, command, body)
+end
+
+
+# Connect to a chat 3.0 server - two arguments: host, IP.
+def local_connect(body)
+  host = _pop_token(body)
+  port = _pop_token(body).to_i
+  if host.length < 1
+    begin
+      host, port = @var[:last_connection]
+    rescue
+      raise "usage: /connect <hostname> [port]"
+    end
+  end
+  port = 9000 if port == 0
+  begin
+    connect(host, port)
+    @var[:last_connection] = [ host, port ]
+    _save_env
+  rescue
+    _notice "Could not connect to #{host}:#{port} - #{$!}", :error
+  end
+end
+
+
+# Reload the control code in user3.rb
+def local_reload(body)
+  load_command_methods()
+  _notice "command methods reloaded", :notice
+end
+
+
+# Disconnect from the current server - no arguments.
+def local_disconnect(body)
+  @connection.disconnect
+  _network_init
+  _notice "disconnected", :global
+end
+
+
+# Grant your session key to the provided user - 1 argument.
+def local_grant(peer)
+  key = @connection.comm.rsa_keys[peer]
+  raise "invalid user: #{peer}" unless key
+  @var[:user_keys][peer] = key
+  content = [ AES3::iv_str(@connection.comm.keyring.default.iv),
+              @connection.comm.keyring.default.key, @var[:our_name],
+              @connection.comm.rsa_keys[:pub] ]
+  _remote_control(peer, :grant, content.join(' '), true)
+  _save_env
+  unless @var[:granted].include? peer
+    @var[:granted] << peer
+    _notice "You have granted access to #{peer}", :crypto
+  end
+end
+
+
+# Request a list of names of users logged in to a given chatroom.  If no
+# chatroom name is provided, the current room name will be used.
+def local_names(body)
+  body = @var[:room] if body.length < 1
+  room_id = @connection.room_ids[body]
+  raise "Invalid room name: #{body}" unless room_id
+  @var[:names_requested] = true
+  _server_control('names', room_id)
+end
+
+
+# Ping a user explicitly.  One argument - peer's name.
+def local_ping(body)
+  @var[:ping_request] = Time.now
+  body = @var[:our_name] unless _user_keyhash(body)
+  _remote_control(body, 'ping', 'empty')
+end
+
+
+# Toggle auto-grant on and off
+def local_auto_grant(body)
+  @var[:auto_grant] = !@var[:auto_grant]
+  _save_env
+  _notice "You have turned auto grant #{@var[:auto_grant] ? 'on' : 'off'}.",
+          :notice
+end
+
+
+# Exit chat; no arguments.
+def local_quit(body)
+  ### send notice of disconnection?
+  Kernel.exit
+end
+
+
+# Set an away message with the other users, not with the server.  Supply
+# arguments to set an away message, no arguments to return.
+def local_away(body)
+  if body.length > 0
+    @var[:away] = body
+    _remote_control(nil, 'pong', "away #{body}")
+    #@var[:presence][@connection.comm.our_keyhash] = [ 'away', body ]
+  else
+    local_back('')
+  end
+end
+
+
+# Declare that you are back, optionally specify a greeting.
+def local_back(body)
+  return nil unless @var.delete(:away)
+  _remote_control(nil, 'pong', "online #{body}")
+  #@var[:presence][@connection.comm.our_keyhash] = [ 'online', body ]
+end
+
+
+# Send a private message to another user.  This message will not be encrypted
+# with AES - it will be encrypted entirely with the recipient's public RSA
+# key.  If the recipient is not currently logged in, the server will hold
+# the message on behalf of the recipient until he next logs in.
+def local_msg(body)
+  peer = _pop_token(body)
+  return nil if body.length < 1
+  key = @connection.comm.rsa_keys[peer]
+  raise "invalid user: #{peer}" unless key
+  _remote_control(peer, :msg, body, true)
+end
+
+
+# Join a chat room - one argument.
+def local_join(body)
+  room = body.dup
+  return nil unless room.length >= 1
+  room_hash = MD5::digest(room)[0,8]
+  room_hash = EMPTY_ROOM if room == 'chat'
+  @connection.room_names[room_hash] = room
+  @connection.room_ids[room] = room_hash
+  _remote_control(@var[:our_name], :invite, body, true)
+  _server_control('join', room_hash)
+  local_switch(room.dup)
+end
+
+
+# Leave a chat room - one argument.
+def local_leave(body)
+  room = body.dup
+  room = @var[:room] unless room.length >= 1
+  room_hash = MD5::digest(room)[0,8]
+  room_hash = EMPTY_ROOM if room == 'chat'
+  unless room == 'chat'
+    @connection.room_names.delete(room_hash)
+    @connection.room_ids.delete(room)
+  end
+  _server_control('leave', room_hash)
+  local_switch('chat')
+end
+
+
+# Switch to speaking in the given chatroom.  If no room is given, the main
+# room will be selected.  Private messaging can be accomplished by prepending
+# a '@' character to the user's name.
+def local_switch(body, prevent = false)
+  room = body
+  room = 'chat' if room.length < 1
+  unless @connection.room_ids[room] or room == 'chat' or room[0,1] == '@'
+    _notice "You are not in room '#{room}'", :error
+    return nil
+  end
+  @var[:room] = room
+  unless prevent
+    if room[0,1] == '@'
+      _notice "You are now private messaging with #{room[1..-1]}.", room
+    else
+      _notice "You are now chatting in '#{room}'", room
+    end
+  end
+end
+
+
+# Generate a new private AES key and sent it to all of our currently
+# connected, trusted friends.
+def local_rekey(body)
+  @connection.comm.keyring.rekey!
+  @var[:granted].each { |peer| local_grant(peer) }
+  _notice "New symmetric key generated " +
+          "(#{AES3::iv_str(@connection.comm.keyring.default.iv)}).", :crypto
+end
+
+
+# A user is logging in.  Maybe it's us!
+def remote_name(sender, body)
+  params = body.split
+  return nil unless params.length == 2 and params.first =~ /[0-9a-f]+:[0-9a-f]+/
+  local_rekey('')
+  key_hash = MD5::digest(params.first)[0,8]
+  fingerprint = []
+  key_hash.each_byte { |x| fingerprint << ("%02x" % x) }
+  fingerprint = fingerprint.join(' ')
+  if key_hash == @connection.comm.our_keyhash
+    if @var[:logged_in]
+      _notice "Your account has connected from another location.", :notice
+      @var[:logged_in] += 1
+      local_grant(_user_name(key_hash))
+    else
+      _notice "Connected to #{@var[:last_connection].join(':')}.", :global
+      @var[:logged_in] = 1
+    end
+  else
+    if @connection.comm.rsa_keys[params.last] and
+       @connection.comm.rsa_keys[params.last] != params.first
+      raise "User spoofing detected!  #{params.last} tried to sign on " +
+            "with an invalid key (#{fingerprint})."
+    end
+    name = _user_name(key_hash)
+    if name != 'unknown_user'
+      _notice "Trusted user #{name} has connected.", 'chat'
+      local_grant(name)
+    else
+      name = params.last
+      @connection.comm.rsa_keys[name] = params.first
+      @connection.comm.names[key_hash] = name
+      _notice "Someone claiming to be #{name} has connected (#{fingerprint})",
+              'chat'
+
+      # Should we auto-grant them?
+      local_grant(name) if @var[:auto_grant]
+    end
+  end
+end
+
+
+# A remote user has granted us their AES key!  Let's add it to our keyring.
+# Format: "grant" <aes_iv_str> <aes_key> <peer_name> <peer_rsa_key>
+def remote_grant(sender, body)
+  key_id  = AES3::iv_from_str(_pop_token(body))
+  aes_key = _pop_token(body)
+  peer    = _pop_token(body)
+  rsa_key = _pop_token(body)
+  fingerprint = []
+  key_hash = MD5::digest(rsa_key)[0,8]
+  key_hash.each_byte { |x| fingerprint << ("%02x" % x) }
+  fingerprint = fingerprint.join(' ')
+  _adjust_presence('online', key_hash, EMPTY_ROOM, '', false)
+  _adjust_presence('join',   key_hash, EMPTY_ROOM, '', false)
+
+  # Are we getting an AES key from another instance of our account?
+  if _user_keyhash(sender) == @connection.comm.our_keyhash
+    unless @connection.comm.keyring.ring[key_id]
+      local_grant(sender)
+      @connection.comm.keyring.add_key(key_id, aes_key)
+    end
+    return nil
+  end
+  @connection.comm.keyring.add_key(key_id, aes_key)
+
+  # Are we getting this key from a trusted user?
+  if _user_keyhash(sender)
+    if _user_keyhash(sender) != key_hash
+      known = []
+      _user_keyhash(sender).each_byte { |x| known << ("%02x" % x) }
+      known = known.join(' ')
+      _notice("User #{sender} (claiming to be #{peer}) has sent you a " +
+              "public key you don't recognize.  Fingerprint is " +
+              "(#{fingerprint}), expected (#{known})", :notice)
+      return nil
+    end
+    peer = sender
+    unless @var[:granted_by].include? peer
+      _notice("You were granted access by trusted user #{peer} " +
+              "(#{fingerprint})", :crypto)
+      @var[:granted_by] << peer
+    end
+    local_grant(peer) unless @var[:granted].include?(peer)
+
+  # We don't know exactly who sent us this key, do we?
+  else
+    @connection.comm.rsa_keys[peer] = rsa_key
+    @connection.comm.names[key_hash] = peer
+    _notice "You were granted access by new user #{peer} (#{fingerprint})",
+            :crypto
+    local_grant(peer) if @var[:auto_grant] and not @var[:granted].include?(peer)
+  end
+end
+
+
+# We've received a keepalive from the server.  Woo friggin' hoo.
+def remote_keepalive(sender, body)
+end
+
+
+# We've received a list of keyhashes from the server for a given room.
+def remote_names(sender, body)
+  return nil unless sender == 'server'
+  room = @connection.room_names[body[0,8]]
+  body[0,8] = ''
+  key_hashes = []
+  while body.length >= 8 do
+    key_hashes << body[0,8]
+    body[0,8] = ''
+  end
+
+  # Print the names if explicitly requested
+  if @var.delete(:names_requested)
+    _notice("#{room}: #{key_hashes.collect { |x| _user_name(x) }.join('  ')}",
+            room)
+  end
+  
+  # Quietly update presence state
+  @var[:membership][room] = []
+  key_hashes.each do |kh|
+    _adjust_presence('join', kh, room, '', false)
+    # request salutation and status silently for each user?
+  end
+end
+
+
+# Display a notice message, print the sender's name if not from the server
+def remote_notice(sender, body)
+  if sender == 'server'
+    sender = ''
+  else
+    sender = "#{sender} "
+  end
+  _notice "#{sender}#{body}", :notice
+end
+
+
+# A user is joining a chatroom, leaving a chatroom, going away, or coming back.
+# Always from server.  Format: operation SPACE peer{8} room{8} [ reason ]
+def remote_presence(sender, body)
+  raise "Attempted presense attack from #{sender}" if sender != 'server'
+  operation = _pop_token(body)
+  peer = body[0,8]
+  room = @connection.room_names[body[8,8]]
+  msg = body[16..-1]
+  _adjust_presence(operation, peer, room, msg, true)
+end
+
+
+# A user has sent us a private message.  Here the message is already decrypted
+def remote_msg(sender, body)
+  add_msg("|#{sender}| #{body}", :notice)
+end
+
+
+# A user has invited us to join a chatroom.  Maybe it's us.
+def remote_invite(sender, body)
+  room_hash = MD5::digest(body)[0,8]
+  @connection.room_names[room_hash] = body
+  @connection.room_ids[body] = room_hash
+  if _user_keyhash(sender) != @connection.comm.our_keyhash
+    _notice "You have been invited by #{sender} to join #{body}.", :notice
+  end
+end
+
+
+# A remote ping is a status request.  Let's tell 'em where and what we be.
+def remote_ping(sender, body)
+  _notice "PING?/PONG! (#{sender})", :notice
+  _remote_control(sender, 'pong',
+                  @var[:presence][@connection.comm.our_keyhash].join(' '))
+end
+
+
+# A user has sent us their status information; it may have been requested.
+# Format: presence SPACE salutation
+def remote_pong(sender, body)
+  presence = _pop_token(body)
+  req = @var.delete :ping_request
+  if req
+    _notice("Ping reply from #{sender}: #{((Time.now - req) * 1000).to_i}ms",
+            :notice)
+  end
+  if [ 'online', 'away' ].include?(presence)
+    _adjust_presence(presence, _user_keyhash(sender), '', body, true)
+  end
+end
+
+
+# The chat client is starting up!
+def event_startup()
+  require 'md5'
+
+  # Generate a random AES session key first thing
+  @connection.comm.keyring.rekey!
+
+  # Load our environment variables
+  @var[:user_keys] = {}             # Maps usernames to full public keys
+  @var[:last_ping] = Time.now       # Reset our ping counter
+  @var[:timestamp] = "(%H:%M)"      # Default chat timestamp
+  _load_env                         # Load previous environment variables
+
+  # Initialize a blacklist of environment variables we don't want saved
+  @var[:blacklist_env] = Array.new
+  @var[:blacklist_env].push :blacklist_env
+  @var[:blacklist_env].push :script_lines
+  @var[:blacklist_env].push :file_open_raised
+  @var[:blacklist_env].push :last_private_peer
+  @var[:blacklist_env].push :private_user
+  @var[:blacklist_env].push :granted
+  @var[:blacklist_env].push :granted_by
+  @var[:blacklist_env].push :room
+  @var[:blacklist_env].push :away
+  @var[:blacklist_env].push :logged_in
+  @var[:blacklist_env].push :membership
+  @var[:blacklist_env].push :presence
+  @var[:blacklist_env].push :ping_request
+
+  _network_init
+
+  # Startup the timer thread
+  Thread.new do
+    loop do
+      sleep 15
+      dispatch :timer
+    end
+  end
+
+  # Auto-connect?
+  local_connect('') if @var[:auto_connect]
+end
+
+
+# Every few seconds, call this timer function for general housekeeping
+def event_timer
+  if @connection.comm.connected? and Time.now - @var[:last_ping] >= 60
+    begin
+      _server_control("keepalive")
+    rescue
+      _notice("The connection to the server has been lost", :global)
+      @connection.disconnect
+    end
+  end
+end
+
+
+# This event gets raised every time the user sends a broadcast message
+# msg.replace() changes the message, setting it to '' precludes delivery.
+def event_outgoing_broadcast(msg)
+  local_back('') if @var[:away] and @var[:room] == 'chat'
+
+  # Private message?
+  if @var[:room][0,1] == '@'
+    peer = @var[:room].sub('@', '')
+    local_msg("#{peer} #{msg}")
+    msg.replace('')
+  end
+end
+
+
+# Event gets raised when receiving a broadcast message.
+# msg.replace() changes the message, setting it to '' precludes delivery.
+def event_incoming_broadcast(peer, room, msg)
+end
+
+
+# --------------------------------------------------------------------------
+# No more definitions beyond this point
+end
