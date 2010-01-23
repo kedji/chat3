@@ -34,6 +34,7 @@ end
 alias _guser_local_leave local_leave
 def local_leave(body)
   body = @var[:room] if body.empty?
+  raise "You cannot leave the main chatroom" if body == 'chat'
   _guser_local_leave(body) unless body[0,1] == '@'
   @window.remove_tab(body)
 end
@@ -44,6 +45,22 @@ alias _guser_local_switch local_switch
 def local_switch(body)
   _guser_local_switch(body, true)
   @window.room_change(body)
+end
+
+
+# Since we have suppressed room join notifications inherent to local_switch(),
+# we must manually add them back here.
+alias _guser_local_join local_join
+def local_join(body)
+  _guser_local_join(body)
+  _notice "You are now chatting in '#{body}'", body
+end
+
+
+# Close the current tab/room on the screen
+def local_close(body)
+  body = @var[:room] if body.empty?
+  @window.remove_tab(body)
 end
 
 

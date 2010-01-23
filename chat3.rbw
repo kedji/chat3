@@ -154,7 +154,6 @@ class Chat3
   # :notice means the notice buffer.
   def add_msg(msg, room)
     if room == :notice
-      puts msg
       ####  THIS SHOULD GO IN THE NOTICE BUFFER - ADD CODE HERE  ####
       room = :current
     end

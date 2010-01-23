@@ -1,1 +1,39 @@
 Personal Chat 3.0
+
+Redesign of the personal class, Chat 2.1.  Chat 3.0 adds:
+- GUI interface using Fox
+- Peer-granular authentication, allowing untrusted servers
+- Individual rooms
+- 2,400-bit RSA by default
+- Multiple concurrent logins
+
+
+Files:
+------
+
+clent3.rb - Client-side network management
+
+chat3.rbw - Main GUI application
+
+chat_serv3.rb - Chat 3.0 server
+
+chat_window.rb - Main GUI window/container
+
+cmd_chat.rb - Command line interface to Chat 3.0
+
+comm3.rb - Network protocol implementation and abstraction layer for the
+           underlying cryptosystem
+
+controls3.rb - Server-side plugins
+
+room_pane.rb - View and controller for the basic chatroom widget
+
+guser3.rb - Extensions to user3.rb specific to the GUI implementation
+
+keygen3 - Command line tool for generating an RSA keypair an account name
+
+rsa.rb - Pure ruby implementation of the popular RSA encryption protocol
+
+serv_ssl - Server-side abstraction to Ruby's OpenSSL bindings
+
+symmetric3.rb - Class controlling all symmetric encryption and key management

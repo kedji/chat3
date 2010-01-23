@@ -80,10 +80,10 @@ end
 def server_leave(client, body)
   return nil unless @rooms[body]
   return nil unless @rooms[body].include?(client.name)
-  @rooms[body].delete client.name
   select_send(MSG_SERVER, EMPTY_ROOM, @keyring.default.iv,
               server_encrypt("presence leave #{client.name}#{body}")
              ) { |x| @rooms[body].include?(x.name) }
+  @rooms[body].delete client.name
   @rooms.delete body if @rooms[body].empty?
 end
 

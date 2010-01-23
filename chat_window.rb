@@ -120,6 +120,15 @@ class ChatWindow < FXMainWindow
       room_name == name or room_name == :global
     end
 
+    # Do we need to unhide a room?
+    if channel.length == 1 and room_name.class == String
+      indx = @channels.index(channel.first)
+      unless indx == 0
+        @tab_names[indx].show
+        (@tabs.create ; @tabs.show) if @skin[:show_tabs]
+      end
+    end
+
     # Do we need to create a room?  I think we might!
     if channel.empty? and room_name.class == String
       new_tab(room_name)
@@ -145,13 +154,20 @@ class ChatWindow < FXMainWindow
     (@tabs.create ; @tabs.show) if @skin[:show_tabs]
   end
 
-  # Remove the named tab and its corresponding switcher element
+  # Remove the named tab and hide its corresponding switcher element
   def remove_tab(name)
     indx = @channels.index(@channels.find { |room,_| room == name }).to_i
     return nil unless indx > 0
+
+    # Update this particular tab name and our switcher context
     @tab_names[indx].hide
     @tabs.current = 0
     @switcher.current = 0
+    
+    # Now update the tab bar as a whole and redraw
+    if visible_tabs < 2
+      @tabs.hide
+    end
     @tabs.recalc
     @on_room_block.call(@channels[0].first)
   end
@@ -166,9 +182,17 @@ class ChatWindow < FXMainWindow
     @tabs.current = indx
     @switcher.current = indx
     @tab_names[indx].show
+    (@tabs.create ; @tabs.show) if @skin[:show_tabs] and indx != 0
     tab_notify(indx, false)
     @tabs.recalc
     @channels[indx].last.type_focus
+  end
+
+  # Return the number of visible (unhidden) tabs
+  def visible_tabs
+    count = 0
+    @tab_names.each { |x| count += 1 if x.visible? }
+    count
   end
 
 end  # of class ChatWindow

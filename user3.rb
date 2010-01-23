@@ -259,6 +259,9 @@ end
 def local_grant(peer)
   key = @connection.comm.rsa_keys[peer]
   raise "invalid user: #{peer}" unless key
+  if @var[:revoked].delete peer    # just in case
+    _notice "You have re-granted access to revoked user #{peer}"
+  end
   @var[:user_keys][peer] = key
   content = [ AES3::iv_str(@connection.comm.keyring.default.iv),
               @connection.comm.keyring.default.key, @var[:our_name],
@@ -267,9 +270,19 @@ def local_grant(peer)
   _save_env
   unless @var[:granted].include? peer
     @var[:granted] << peer
-    _notice "You have granted access to #{peer}", :crypto
+    _notice "You have granted access to #{peer}"
   end
 end
+
+
+# Deny the given user access to your chat messages, add them to your revocation
+# list so you don't give them access in the future (undo with /grant), and
+# rekey right now.
+def local_revoke(peer)
+  @var[:revoked] << peer unless @var[:revoked].include?(peer)
+  _notice "You have revoked access to #{peer}"
+  local_rekey('')
+end  
 
 
 # Request a list of names of users logged in to a given chatroom.  If no
@@ -297,6 +310,14 @@ def local_auto_grant(body)
   _save_env
   _notice "You have turned auto grant #{@var[:auto_grant] ? 'on' : 'off'}.",
           :notice
+end
+
+
+# Toggle auto-connect on and off
+def local_auto_connect(body)
+  @var[:auto_connect] = !@var[:auto_connect]
+  _save_env
+  _notice "You have turned auto connect #{@var[:auto_connect] ? 'on' : 'off'}."
 end
 
 
@@ -395,7 +416,9 @@ end
 # connected, trusted friends.
 def local_rekey(body)
   @connection.comm.keyring.rekey!
-  @var[:granted].each { |peer| local_grant(peer) }
+  @var[:granted].each do |peer|
+    local_grant(peer) unless @var[:revoked].include?(peer)
+  end
   _notice "New symmetric key generated " +
           "(#{AES3::iv_str(@connection.comm.keyring.default.iv)}).", :crypto
 end
@@ -428,7 +451,7 @@ def remote_name(sender, body)
     name = _user_name(key_hash)
     if name != 'unknown_user'
       _notice "Trusted user #{name} has connected.", 'chat'
-      local_grant(name)
+      local_grant(name) unless @var[:revoked].include?(name)
     else
       name = params.last
       @connection.comm.rsa_keys[name] = params.first
@@ -437,7 +460,9 @@ def remote_name(sender, body)
               'chat'
 
       # Should we auto-grant them?
-      local_grant(name) if @var[:auto_grant]
+      unless @var[:revoked].include?(name)
+        local_grant(name) if @var[:auto_grant]
+      end
     end
   end
 end
@@ -484,15 +509,21 @@ def remote_grant(sender, body)
               "(#{fingerprint})", :crypto)
       @var[:granted_by] << peer
     end
-    local_grant(peer) unless @var[:granted].include?(peer)
+
+    # Grant th is trusted user our key unless we've already given it to him
+    # or we have placed him on our revoked list
+    unless @var[:granted].include?(peer) or @var[:revoked].include?(peer)
+      local_grant(peer)
+    end
 
   # We don't know exactly who sent us this key, do we?
   else
     @connection.comm.rsa_keys[peer] = rsa_key
     @connection.comm.names[key_hash] = peer
-    _notice "You were granted access by new user #{peer} (#{fingerprint})",
-            :crypto
-    local_grant(peer) if @var[:auto_grant] and not @var[:granted].include?(peer)
+    _notice "You were granted access by new user #{peer} (#{fingerprint})"
+    unless @var[:granted].include?(peer) or @var[:revoked].include?(peer)
+      local_grant(peer) if @var[:auto_grant]
+    end
   end
 end
 
