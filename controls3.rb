@@ -66,6 +66,24 @@ def server_names(client, body)
              ) { |x| x == client }
 end  
 
+# A user is setting or requesting an MOTD
+def server_motd(client, body)
+  room = body[0,8]
+  msg = body[8..-1]
+  return nil unless @rooms[room]
+  return nil unless @rooms[room].include?(client.name)
+  if msg.empty?
+    select_send(MSG_SERVER, EMPTY_ROOM, @keyring.default.iv,
+                server_encrypt("motd #{room}#{@motd[room] || ''}")
+               ) { |x| x == client }
+  else
+    @motd[room] = "#{client.name}#{msg}"
+    select_send(MSG_SERVER, EMPTY_ROOM, @keyring.default.iv,
+                server_encrypt("motd #{room}#{@motd[room]}")
+               ) { |x| @rooms[room].include?(x.name) }
+  end
+end 
+
 # A user is joining a chatroom.  Notify everyone.
 def server_join(client, body)
   @rooms[body] ||= []
@@ -73,6 +91,11 @@ def server_join(client, body)
   select_send(MSG_SERVER, EMPTY_ROOM, @keyring.default.iv,
               server_encrypt("presence join #{client.name}#{body}")
              ) { |x| @rooms[body].include?(x.name) }
+  if @motd[body]
+    select_send(MSG_SERVER, EMPTY_ROOM, @keyring.default.iv,
+                server_encrypt("motd #{body}#{@motd[body]}")
+               ) { |x| x == client }
+  end
   @rooms[body] << client.name
 end
 
@@ -84,7 +107,10 @@ def server_leave(client, body)
               server_encrypt("presence leave #{client.name}#{body}")
              ) { |x| @rooms[body].include?(x.name) }
   @rooms[body].delete client.name
-  @rooms.delete body if @rooms[body].empty?
+  if @rooms[body].empty?
+    @rooms.delete body
+    @motd.delete body
+  end
 end
 
 # A user has disconnected or has been disconnected
@@ -126,6 +152,11 @@ end
 # A new connection has been established
 def event_new_connection(client)
   client.var[:last_ping] = Time.now   # Initialize ping-timeout variable
+  if @motd[EMPTY_ROOM]
+    select_send(MSG_SERVER, EMPTY_ROOM, @keyring.default.iv,
+                server_encrypt("motd #{EMPTY_ROOM}#{@motd[EMPTY_ROOM]}")
+               ) { |x| x == client }
+  end
 end
 
 # An exception was raised.  DO NOT invoke any other event handlers, or call

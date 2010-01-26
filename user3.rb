@@ -292,6 +292,15 @@ def local_names(body)
 end
 
 
+# Set or request the MOTD of the current chatroom.
+def local_motd(body)
+  room_name = @var[:room]
+  room_hash = MD5::digest(room_name)[0,8]
+  room_hash = EMPTY_ROOM if room_name == 'chat'
+  _server_control('motd', room_hash + body)
+end
+
+
 # Ping a user explicitly.  One argument - peer's name.
 def local_ping(body)
   @var[:ping_request] = Time.now
@@ -527,6 +536,16 @@ end
 
 # We've received a keepalive from the server.  Woo friggin' hoo.
 def remote_keepalive(sender, body)
+end
+
+
+# We're receiving an MOTD for the given room.
+def remote_motd(sender, body)
+  return nil unless sender == 'server'
+  room = @connection.room_names[body[0,8]]
+  username = _user_name(body[8,8])
+  body[0,16] = ''
+  _notice "-- #{body} (#{username}) --", room
 end
 
 

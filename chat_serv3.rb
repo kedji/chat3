@@ -130,6 +130,7 @@ class ChatServer
     #@listen_socket = TCPServer.new('0.0.0.0', @port.to_i)
     @clients = Hash.new
     @rooms = { "\x00" * 8 => [] }
+    @motd = { }
     @cmds = Array.new      # Server plugins go here
     @var = Hash.new        # Plugin variables go here
     @keyring = Keyring.new

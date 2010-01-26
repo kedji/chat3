@@ -11,7 +11,7 @@
 # subclass).  The chat pane contains one history element, one type-box element,
 # and a horizontal selector between them.
 
-require 'rubygems'
+require 'rubygems' rescue nil
 require 'fox16'
 require 'fox16/colors'
 

@@ -11,7 +11,7 @@
 # the program exits.  It contains one or more room_pane widgets inside of
 # a switcher which may be controlled by visible tabs.
 
-require 'rubygems'
+require 'rubygems' rescue nil
 require 'fox16'
 require 'fox16/colors'
 require 'room_pane.rb'
