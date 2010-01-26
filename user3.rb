@@ -63,10 +63,6 @@ def _network_init
     @connection.comm.rsa_keys[name] = key
     @connection.comm.names[keyhash] = name
   end
-  @var[:our_name] = @var[:our_name] || @connection.comm.rsa_keys[:name]
-  @connection.comm.rsa_keys[:name] = @var[:our_name]
-  @connection.comm.rsa_keys[@var[:our_name]] = @connection.comm.rsa_keys[:pub]
-  @connection.comm.names[@connection.comm.our_keyhash] = @var[:our_name]
 
   # Keys and access
   @var[:granted] = [ @var[:our_name] ]
@@ -265,7 +261,7 @@ def local_grant(peer)
   @var[:user_keys][peer] = key
   content = [ AES3::iv_str(@connection.comm.keyring.default.iv),
               @connection.comm.keyring.default.key, @var[:our_name],
-              @connection.comm.rsa_keys[:pub] ]
+              @var[:pub_rsa] ]
   _remote_control(peer, :grant, content.join(' '), true)
   _save_env
   unless @var[:granted].include? peer
@@ -495,6 +491,7 @@ def remote_grant(sender, body)
   # Are we getting this key from a trusted user?
   if _user_keyhash(sender)
     if _user_keyhash(sender) != key_hash
+
       known = []
       _user_keyhash(sender).each_byte { |x| known << ("%02x" % x) }
       known = known.join(' ')
@@ -634,6 +631,18 @@ def event_startup()
   @var[:last_ping] = Time.now       # Reset our ping counter
   @var[:timestamp] = "(%H:%M)"      # Default chat timestamp
   _load_env                         # Load previous environment variables
+
+  # This is where we load the user's public and private key from the env.yml
+  # configuration file.  If it's not there, we spawn a helpful creation tool.
+  # This tool MUST return public key, private key, and user-name.
+  unless @var[:our_name] and @var[:pub_rsa] and @var[:prv_rsa]
+$stderr.puts "YOU HAVE NO KEYS!  TOOL GOES HERE."
+# @var[:our_name], @var[:pub_rsa], @var[:prv_rsa] = keygen_tool()
+# _save_env
+Kernel.exit(0)
+  end
+  @connection.comm.initialize_address_book(@var[:pub_rsa], @var[:prv_rsa],
+                                           @var[:our_name])
 
   # Initialize a blacklist of environment variables we don't want saved
   @var[:blacklist_env] = Array.new

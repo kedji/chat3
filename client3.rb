@@ -34,12 +34,11 @@ class ChatConnection
   end
 
   # method: connect to this addr on this port
-  def connect(addr, port)
+  def connect(addr, port, pub_key, name)
     disconnect if @comm.connected?
     @comm.open_ssl_socket(addr, port.to_i)
     @comm.start_thread { |t, s, r, m| read_message(t, s, r, m) }
-    @comm.server_message([ "name", @comm.rsa_keys[:pub],
-                           @comm.rsa_keys[:name] ].join(' '))
+    @comm.server_message([ "name", pub_key, name ].join(' '))
   end
 
   # Shut down the connection

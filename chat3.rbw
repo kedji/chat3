@@ -39,7 +39,8 @@ class Chat3
   end
 
   def connect(addr, port)
-    @connection.connect(addr, port.to_i)
+    raise "You are not registered!" unless @var[:pub_rsa] and @var[:our_name]
+    @connection.connect(addr, port.to_i, @var[:pub_rsa], @var[:our_name])
   end
 
   def run

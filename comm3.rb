@@ -19,7 +19,6 @@ require 'monitor'
 
 require 'symmetric3.rb'
 require 'rsa.rb'
-require 'address_book.rb'
 
 
 # Chat 3.0 Message Format:
@@ -64,20 +63,19 @@ class CryptoComm
 
   def initialize
     @keyring = Keyring.new
-    @rsa_keys = RSA_ADDRESS_BOOK
+    @rsa_keys = { }
     @socket = nil
     @thread = nil
     @mutex = Monitor.new    # universal, top-level mutex object
+  end
 
-    # Build our reverse address book out of MD5 hashes
-    @our_keyhash = MD5::digest(@rsa_keys[:pub])[0,8]
-    @names = { @our_keyhash => @rsa_keys[:name], EMPTY_ROOM => 'server' }
-    @rsa_keys.each do |n,k|
-      if k.class == String && n.class == String
-        @names[MD5::digest(k)[0,8]] = n
-      end
-    end
-    @rsa_keys[@rsa_keys[:name]] = @rsa_keys[:pub]
+  # Build our reverse address book out of MD5 hashes
+  def initialize_address_book(pub_key, prv_key, name)
+    @our_keyhash = MD5::digest(pub_key)[0,8]
+    @names = { @our_keyhash => name, EMPTY_ROOM => 'server' }
+    @rsa_keys[name] = pub_key
+    @pub_rsa = pub_key
+    @prv_rsa = prv_key
   end
 
   attr_reader :socket, :keyring, :mutex, :rsa_keys, :names, :our_keyhash
@@ -208,8 +206,8 @@ class CryptoComm
               msg = @keyring.decrypt(rki, opaque)
               callback.call(type, sender_hash, room, msg)
             rescue
-              callback.call(nil, nil, nil, "could not decrypt message from " +
-                            "#{sender_name(sender_hash)}")
+              callback.call(nil, nil, nil, "could not decrypt broadcast " +
+                            "message from #{sender_name(sender_hash)}")
             end
           end
         elsif type == 'C'
@@ -222,8 +220,8 @@ class CryptoComm
               msg = @keyring.decrypt(rki, opaque)
               callback.call('C', sender_hash, !!rcpt, msg)
             rescue
-              callback.call(nil, nil, nil, "could not decrypt message from " +
-                            "#{sender_name(sender_hash)}")
+              callback.call(nil, nil, nil, "could not decrypt control " +
+                            "message from #{sender_name(sender_hash)}")
             end
           end
         elsif type == 'S'
@@ -234,20 +232,20 @@ class CryptoComm
               callback.call('C', sender_hash, nil, msg)
             rescue
 #$stderr.puts "ERROR: #{$!}\n#{$@.join("\n")}"
-              callback.call(nil, nil, nil, "could not decrypt message from " +
-                            "#{sender_name(sender_hash)}")
+              callback.call(nil, nil, nil, "could not decrypt server " +
+                            "message from #{sender_name(sender_hash)}")
             end
           end
         elsif type == 'P' or type == 'A'
 #$stderr.puts "Got private message"
           @mutex.synchronize do
-            rsa = Key.new(@rsa_keys[:prv])
+            rsa = Key.new(@prv_rsa)
             begin
               msg = rsa.decrypt(opaque)
               callback.call('C', sender_hash, nil, msg)
             rescue
-              callback.call(nil, nil, nil, "could not decrypt message from " +
-                            "#{sender_name(sender_hash)}")
+              callback.call(nil, nil, nil, "could not decrypt private " +
+                            "message from #{sender_name(sender_hash)}")
             end
           end
         elsif type == 'A'
