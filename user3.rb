@@ -636,10 +636,14 @@ def event_startup()
   # configuration file.  If it's not there, we spawn a helpful creation tool.
   # This tool MUST return public key, private key, and user-name.
   unless @var[:our_name] and @var[:pub_rsa] and @var[:prv_rsa]
-$stderr.puts "YOU HAVE NO KEYS!  TOOL GOES HERE."
-# @var[:our_name], @var[:pub_rsa], @var[:prv_rsa] = keygen_tool()
-# _save_env
-Kernel.exit(0)
+    @var[:our_name], @var[:pub_rsa], @var[:prv_rsa] = keygen_tool()
+    if @var[:our_name] and @var[:prv_rsa].to_s =~ /[0-9a-f]+:[0-9a-f]+/ and
+       @var[:pub_rsa].to_s =~ /[0-9a-f]+:[0-9a-f]+/
+      _save_env
+    else
+      add_error("YOU HAVE NO KEYS!  TOOL MUST BE CALLED.")
+      Kernel.exit(0)
+    end
   end
   @connection.comm.initialize_address_book(@var[:pub_rsa], @var[:prv_rsa],
                                            @var[:our_name])

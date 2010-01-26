@@ -114,6 +114,14 @@ class Chat3
     end
   end
 
+  # This method gets invoked if the local user's environment file (env.yml)
+  # does not contain their username and public/private RSA key pair.  This
+  # method should prompt for a (unique) username, and then generate an RSA
+  # keypair, and return all three:  username, pub_rsa, prv_rsa
+  def keygen_tool
+    return nil, nil, nil    # ADD CODE HERE
+  end
+
   # Load methods which can be used for /cmd commands
   def load_command_methods()
     begin
