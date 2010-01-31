@@ -19,10 +19,14 @@ require 'room_pane.rb'
 include Fox
 
 class ChatWindow < FXMainWindow
+  include Responder
+  
   WINDOW_HEIGHT = 320
   WINDOW_WIDTH  = 480
   WINDOW_TITLE  = "Chat 3.0"
   SHOW_TABS     = true
+  ID_NEXT_TAB   = ID_LAST + 1
+  ID_PREV_TAB   = ID_NEXT_TAB + 1
 
   def initialize(app, skin = {})
     @skin = skin
@@ -67,6 +71,24 @@ class ChatWindow < FXMainWindow
 
     # Tab selection should map directly to the switcher
     @tabs.connect(SEL_COMMAND, method(:on_tab_select))
+
+    # Hook up keyboard accelerators old-school FXRuby style
+    FXMAPFUNC(SEL_COMMAND, ID_NEXT_TAB, :next_tab)
+    accelTable.addAccel(fxparseAccel("Ctrl+N"),
+                        self, FXSEL(SEL_COMMAND, ID_NEXT_TAB))
+    accelTable.addAccel(Fox.MKUINT(KEY_Tab, CONTROLMASK),
+                        self, FXSEL(SEL_COMMAND, ID_NEXT_TAB))
+    accelTable.addAccel(Fox.MKUINT(KEY_KP_Tab, CONTROLMASK),
+                        self, FXSEL(SEL_COMMAND, ID_PREV_TAB))
+    FXMAPFUNC(SEL_COMMAND, ID_PREV_TAB, :prev_tab)
+    accelTable.addAccel(fxparseAccel("Ctrl+Shift+N"),
+                        self, FXSEL(SEL_COMMAND, ID_PREV_TAB))
+    accelTable.addAccel(Fox.MKUINT(KEY_Tab, CONTROLMASK | SHIFTMASK),
+                        self, FXSEL(SEL_COMMAND, ID_PREV_TAB))
+    accelTable.addAccel(Fox.MKUINT(KEY_KP_Tab, CONTROLMASK | SHIFTMASK),
+                        self, FXSEL(SEL_COMMAND, ID_PREV_TAB))
+    accelTable.addAccel(Fox.MKUINT(KEY_ISO_Left_Tab, CONTROLMASK | SHIFTMASK),
+                        self, FXSEL(SEL_COMMAND, ID_PREV_TAB))
   end
 
   def create
@@ -87,13 +109,17 @@ class ChatWindow < FXMainWindow
     end
   end
 
-  # A user has clicked on a tab
-  def on_tab_select(sender, selector, e)
-    indx = @tabs.current
+  def select_tab(indx)
+    @tabs.current = indx
     tab_notify(indx, false)
     @switcher.current = indx
     @on_room_block.call(@channels[indx].first)
     @channels[indx].last.type_focus
+  end
+  
+  # A user has clicked on a tab
+  def on_tab_select(sender, selector, e)
+    select_tab(@tabs.current)
   end
 
   # Register a callback block for handling user-typed lines in one of the
@@ -172,6 +198,24 @@ class ChatWindow < FXMainWindow
     @on_room_block.call(@channels[0].first)
   end
 
+  def next_tab(sender, sel, data)
+    max = @tab_names.length
+    indx = (@tabs.current + 1) % max
+    until @tab_names[indx].visible?
+      indx = (indx + 1) % max
+    end
+    select_tab(indx)
+  end
+
+  def prev_tab(sender, sel, data)
+    max = @tab_names.length
+    indx = (@tabs.current - 1) % max
+    until @tab_names[indx].visible?
+      indx = (indx - 1) % max
+    end
+    select_tab(indx)
+  end
+  
   # The sneaky user has changed the room without the GUI.  Bastards!
   def room_change(room_name)
     indx = @channels.index(@channels.find { |room,_| room == room_name })
