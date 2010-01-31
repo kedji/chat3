@@ -111,8 +111,12 @@ class Chat3
         end
       end
     elsif msg.length > 0
-      dispatch :outgoing_broadcast, msg
-      @connection.chat_msg(msg, @var[:room])
+      if @connection.connected?
+        dispatch :outgoing_broadcast, msg
+        @connection.chat_msg(msg, @var[:room])
+      else
+        add_error "not connected to server"
+      end
     end
   end
 

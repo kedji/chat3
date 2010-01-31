@@ -13,16 +13,21 @@ require 'comm3.rb'
 
 class ChatConnection
 
-  # Takes a callback block which accepts (type, sender, room, msg)  
+  # Takes a callback block which accepts (type, sender, room, msg)
   def initialize(&callback)
     @comm = CryptoComm.new     # Our connection to the server
     @mutex = @comm.mutex
     @msg_callback = callback
     @room_names = { "\x00" * 8 => 'chat' }
     @room_ids = { 'chat' => "\x00" * 8 }
+    @connected = false
   end
 
   attr_reader :room_names, :room_ids, :comm
+
+  def connected?
+    @connected
+  end
 
   # Provide our mutex object to our owner
   def mutex
@@ -39,11 +44,13 @@ class ChatConnection
     @comm.open_ssl_socket(addr, port.to_i)
     @comm.start_thread { |t, s, r, m| read_message(t, s, r, m) }
     @comm.server_message([ "name", pub_key, name ].join(' '))
+    @connected = true
   end
 
   # Shut down the connection
   def disconnect
     @comm.shutdown
+    @connected = false
     ################## send notice of disconnection?
   end
 
