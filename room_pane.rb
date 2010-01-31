@@ -45,12 +45,15 @@ class RoomPane < FXPacker
 
     # Splitter children
     @history = FXText.new(@splitter, :height => height - TYPE_HEIGHT - 4,
-                          :opts => TEXT_WORDWRAP | LAYOUT_FILL_X)
+      :opts => TEXT_WORDWRAP | LAYOUT_FILL_X | TEXT_READONLY)
     @type = FXText.new(@splitter, :opts => TEXT_WORDWRAP)
     apply_skin(skin)
 
     # Register our one callback
     @type.connect(SEL_KEYPRESS, method(:on_keypress))
+
+    # Automatically give focus to the input text box
+    @history.connect(SEL_FOCUSIN) { @type.setFocus() }
   end
 
   # Apply the appearance variables contained in our 'skin' hash, accepting
