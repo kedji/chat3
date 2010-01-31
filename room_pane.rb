@@ -39,7 +39,7 @@ class RoomPane < FXPacker
 
     # Split the history display from the type-box widget
     @splitter = FXSplitter.new(self, :opts => SPLITTER_VERTICAL | LAYOUT_FILL)
-    
+
     # Fully automatic resizing isn't available with splitter-contained widgets
     @splitter.connect(SEL_COMMAND) { @type_height = @type.height }
 
@@ -49,10 +49,8 @@ class RoomPane < FXPacker
     @type = FXText.new(@splitter, :opts => TEXT_WORDWRAP)
     apply_skin(skin)
 
-    # Register our one callback
+    # Register callbacks
     @type.connect(SEL_KEYPRESS, method(:on_keypress))
-
-    # Automatically give focus to the input text box
     @history.connect(SEL_FOCUSIN) { @type.setFocus() }
   end
 
@@ -69,22 +67,21 @@ class RoomPane < FXPacker
     @skin[:scrollbars]        ||=  SCROLLBARS
     @skin[:pad_history]       ||=  PAD_HISTORY
     @skin[:splitter_size]     ||=  SPLITTER_SIZE
-    
+
     # Apply
     @splitter.barSize = @skin[:splitter_size]
     self.padTop = (@skin[:pad_history] ? 2 : 0)
     @type.textColor = @history.textColor = @skin[:text_color]
     @type.backColor = @history.backColor = @skin[:back_color]
-    @type.cursorColor = @history.cursorColor = @skin[:cursor_color]
+    @history.cursorColor = @skin[:back_color]
+    @type.cursorColor = @skin[:cursor_color]
     @type_height = @skin[:type_height]
     @history.height = @history.height + @type.height - @type_height
     font = FXFont.new(app, @skin[:font], @skin[:font_size])
     @type.font = @history.font = font
     if @skin[:scrollbars]
-      @type.scrollStyle = (@type.scrollStyle | VSCROLLER_NEVER) -
-                          VSCROLLER_NEVER
-      @history.scrollStyle = (@type.scrollStyle | VSCROLLER_NEVER) -
-                              VSCROLLER_NEVER
+      @type.scrollStyle &= ~VSCROLLER_NEVER
+      @history.scrollStyle &= ~VSCROLLER_NEVER
     else
       @type.scrollStyle |= VSCROLLER_NEVER
       @history.scrollStyle |= VSCROLLER_NEVER
@@ -116,11 +113,15 @@ class RoomPane < FXPacker
 
   # Event handler that gets called when a user presses a key inside the
   # type box
-  def on_keypress(sender, selector, e)
-    if e.code == KEY_Return || e.code == KEY_KP_Enter
+  def on_keypress(sender, selector, data)
+    code = data.code
+    if code == KEY_Return or code == KEY_KP_Enter
       @on_line_block.call(@type.text)
       @type.text = ''
       return true
+    elsif code == KEY_Page_Up or code == KEY_Page_Down or \
+          code == KEY_KP_Page_Up or code == KEY_KP_Page_Down
+      @history.handle(sender, selector, data)
     end
     return false
   end
