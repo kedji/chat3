@@ -7,9 +7,8 @@
 # use of this software.  All license is reserved.
 
 
-# This VIEW class defines the structure of a single chat pane (FXPacker
-# subclass).  The chat pane contains one history element, one type-box element,
-# and a horizontal selector between them.
+# The View and Controller for Stratego within Chat 3.0.  Fixed aspect-ratio,
+# scalable board.
 
 require 'rubygems' rescue nil
 require 'fox16'
@@ -18,19 +17,26 @@ require 'fox16/colors'
 include Fox
 
 class StrategoPane < FXPacker
-  FONT          =  'courier'
-  FONT_SIZE     =         10
-  BOARD_COLOR   = 0x00003012
-  BACK_COLOR    = 0x00081010
-  BLUE_COLOR    = 0x00a01010
-  RED_COLOR     = 0x000000a0
-  WATER_COLOR   = 0x00300000
+  BOARD_WIDTH      = 480
+  BOARD_HEIGHT     = 320
+  ASPECT           = BOARD_WIDTH.to_f / BOARD_HEIGHT.to_f
+  FONT             =  'courier'
+  FONT_SIZE        =         10
+  BOARD_COLOR      = 0x00003012
+  BACK_COLOR       = 0x00081010
+  BLUE_COLOR       = 0x00a01010
+  RED_COLOR        = 0x000000a0
+  WATER_COLOR      = 0x00300000
+  HIGHLIGHT_COLOR  = 0x0000bbbb
 
-  # Positional percentages - the board scales when resized
+  # Positional percentages - the board scales when resized.  These are
+  # percentages of the HEIGHT of the window.  That is, width values can
+  # be (and will be) more than 100%.
   BOARD_TOP     = 0.005
-  BOARD_BOTTOM  = 0.90
+  BOARD_BOTTOM  = 0.905
   BOARD_LEFT    = 0.005
-  BOARD_RIGHT   = 0.70
+  BOARD_RIGHT   = 0.905
+  SQUARE_INC    = (BOARD_BOTTOM - BOARD_TOP) / 10
 
   def initialize(parent, skin = {})
     super(parent, :opts => LAYOUT_FILL)
@@ -43,6 +49,7 @@ class StrategoPane < FXPacker
     @canvas = FXCanvas.new(self, :opts => LAYOUT_FILL_X | LAYOUT_FILL_Y |
       LAYOUT_TOP | LAYOUT_LEFT)
     @canvas.connect(SEL_PAINT, method(:board_draw))
+    @canvas.connect(SEL_LEFTBUTTONPRESS, method(:left_button_down))
   end
 
   # Redraw the whole board
@@ -51,62 +58,57 @@ class StrategoPane < FXPacker
       dc.foreground = BACK_COLOR
       dc.fillRectangle(event.rect.x, event.rect.y, event.rect.w,
                        event.rect.h)
-      dc.foreground = BOARD_COLOR
-      dc.fillRectangle(*percent_rectangle(BOARD_LEFT, BOARD_TOP,
-                                          BOARD_RIGHT, BOARD_BOTTOM))
 
       # Grab the dimensions of the board and its individual squares
-      top = @canvas.height * BOARD_TOP
-      bottom = @canvas.height * BOARD_BOTTOM
-      left = @canvas.width * BOARD_LEFT
-      right = @canvas.width * BOARD_RIGHT
-      hor_i = (right - left) / 10
-      ver_i = (bottom - top) / 10
+      @inc = (@canvas.height * SQUARE_INC).to_i
+      @top = (@canvas.height * BOARD_TOP).to_i
+      @bottom = @top + @inc * 10
+      @left = (@canvas.height * BOARD_LEFT).to_i
+      @right = @top + @inc * 10
+
+      # The background
+      dc.foreground = BOARD_COLOR
+      dc.fillRectangle(@left, @top, @inc * 10, @inc * 10)
 
       # The lakes?
       dc.foreground = WATER_COLOR
-      #dc.fillCircle((hor_i * 3 + left).to_i, (ver_i * 4 + top).to_i,
-      #               (hor_i * 2).to_i) #, (ver_i * 2).to_i)
-      dc.fillRectangle((hor_i * 2 + left).to_i, (ver_i * 4 + top).to_i,
-                       (hor_i * 2).to_i + 1, (ver_i * 2).to_i + 1)
-      dc.fillRectangle((hor_i * 6 + left).to_i, (ver_i * 4 + top).to_i,
-                       (hor_i * 2).to_i + 1, (ver_i * 2).to_i + 1)
+      dc.fillRectangle(@inc * 2 + @left,  @inc * 4 + @top,
+                       @inc * 2 + 1,      @inc * 2 + 1)
+      dc.fillRectangle(@inc * 6 + @left,  @inc * 4 + @top,
+                       @inc * 2 + 1,      @inc * 2 + 1)
 
       # Lines to form the 10x10 playing grid
       dc.foreground = 0x0
       11.times do |i|
-        dc.drawLine(left.to_i, (i * ver_i + top).to_i,
-                    right.to_i, (i * ver_i + top).to_i)
-        dc.drawLine((i * hor_i + left).to_i, top.to_i,
-                    (i * hor_i + left).to_i, bottom.to_i)
+        dc.drawLine(@left,             i * @inc + @top,
+                    @right,            i * @inc + @top)
+        dc.drawLine(i * @inc + @left,  @top,
+                    i * @inc + @left,  @bottom)
       end
     end
   end
 
-  # Return the x, y, width, and height variables given (X,Y) coordinates of
-  # top/left and bottom/right as percentages
-  def percent_rectangle(left, top, right, bottom)
-    corner = [ (@canvas.width * left).to_i,
-               (@canvas.height * top).to_i ]
-    corner << (@canvas.width * right).to_i - corner[0]
-    corner << (@canvas.height * bottom).to_i - corner[1]
-    corner
-  end
-
-  # Scale a horizontal percentage into a position on the canvas
-  def xs(percent)
-    (@canvas.width * percent).to_i
-  end
-
-  # Scale a vertical percentage into a position on the canvas
-  def ys(percent)
-    (@canvas.height * percent).to_i
-  end
-
   # This object generates only one synthetic event - character strings
-  # typed by the user.
+  # "typed" by the user.
   def on_line(&blk)
     @on_line_block = blk
+  end
+
+  # Highlight (or un-highlight) the given square
+  def highlight(x, y)
+    FXDCWindow.new(@canvas) do |dc|
+      dc.foreground = HIGHLIGHT_COLOR
+      dc.drawRectangle(@left + @inc * x + 1, @top + @inc * y + 1,
+                       @inc - 2, @inc - 2)
+    end    
+  end
+
+  # The left mouse button has been pressed
+  def left_button_down(sender, selector, event)
+    x = (event.win_x - @left) / @inc
+    y = (event.win_y - @top) / @inc
+    highlight(x, y)
+#puts "(#{x}, #{y})"
   end
 
 end  # of class StrategoPane
@@ -115,8 +117,8 @@ end  # of class StrategoPane
 ###  TESTING ONLY  ###
 if __FILE__ == $0
   FXApp.new do |app|
-    main = FXMainWindow.new(app, "Room Pane Test", :width => 480,
-                            :height => 320)
+    main = FXMainWindow.new(app, "Stratego Test",
+      :width => StrategoPane::BOARD_WIDTH, :height => StrategoPane::BOARD_HEIGHT)
     board = StrategoPane.new(main)
     board.on_line { |x| puts x }
     main.show
