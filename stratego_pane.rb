@@ -20,7 +20,7 @@ class StrategoPane < FXPacker
   BOARD_WIDTH      = 480
   BOARD_HEIGHT     = 320
   ASPECT           = BOARD_WIDTH.to_f / BOARD_HEIGHT.to_f
-  FONT             =  'courier'
+  FONT             = 'helvetica'
   FONT_SIZE        =         10
   BOARD_COLOR      = 0x00003012
   BACK_COLOR       = 0x00081010
@@ -107,8 +107,36 @@ class StrategoPane < FXPacker
   def left_button_down(sender, selector, event)
     x = (event.win_x - @left) / @inc
     y = (event.win_y - @top) / @inc
-    highlight(x, y)
-#puts "(#{x}, #{y})"
+    #	highlight(x, y)
+    draw_piece(x, y, "B", [:red, :blue][(x+y) % 2])
+  end
+
+  # Draw a piece with the given name/color at the given location
+  def draw_piece(x, y, name, color)
+    FXDCWindow.new(@canvas) do |dc|
+      dc.foreground = (color == :red ? RED_COLOR : BLUE_COLOR)
+      dc.fillRectangle(@left + @inc * x + 4, @top + @inc * y + 3,
+                       @inc - 7, @inc - 5)
+      dc.foreground = 0
+      dc.drawRectangle(@left + @inc * x + 4, @top + @inc * y + 3,
+                       @inc - 8, @inc - 6)
+
+## ???  How does one write text to the screen?
+#myf = FXFont.new(app, FONT, FONT_SIZE)
+#dc.font = myf
+#dc.drawText(@left + @inc * x + 6, @top + @inc * y + 3, name)
+    end
+  end
+
+  ## ???  Clipping?  I don't know.
+  def img_piece(color, name)
+    img = FXImage.new(app, :width => @inc - 8, :height => @inc - 8)
+    img.create
+    FXDCWindow.new(img) do |dc|
+      dc.foreground = (color == :red ? RED_COLOR : BLUE_COLOR)
+      dc.fillRectangle(0, 0, img.width, img.height)
+    end
+    img
   end
 
 end  # of class StrategoPane
