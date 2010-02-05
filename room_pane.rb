@@ -32,6 +32,9 @@ class RoomPane < FXPacker
 
   def initialize(parent, skin = {})
     super(parent, :opts => LAYOUT_FILL)
+    @type_history = []      # history of things typed in this window
+    @type_history_pos = 0   # our position while scrolling through the history
+    @type_current = nil     # buffer saving our current line while scrolling
 
     # We may want a 2-pixel border on the inside-top of this pane, otherwise
     # no borders.
@@ -117,11 +120,33 @@ class RoomPane < FXPacker
     code = data.code
     if code == KEY_Return or code == KEY_KP_Enter
       @on_line_block.call(@type.text)
+      @type_history << @type.text.dup
+      @type_history_pos = @type_history.length
+      @type_current = nil
       @type.text = ''
       return true
-    elsif code == KEY_Page_Up or code == KEY_Page_Down or \
+    elsif code == KEY_Page_Up or code == KEY_Page_Down or
           code == KEY_KP_Page_Up or code == KEY_KP_Page_Down
       @history.handle(sender, selector, data)
+    elsif code == KEY_Up
+      @type_current = @type.text if @type_history_pos == @type_history.length
+      if @type_history_pos > 0
+        @type_history_pos -= 1
+        @type.text = @type_history[@type_history_pos].dup
+        @type.setCursorPos(@type.text.length)
+      end
+      return true
+    elsif code == KEY_Down
+      @type_history_pos += 1 if @type_history_pos < @type_history.length
+      if @type_history_pos < @type_history.length 
+        @type.text = @type_history[@type_history_pos].dup
+        @type.setCursorPos(@type.text.length)
+      elsif @type_current
+        @type.text = @type_current
+        @type.setCursorPos(@type.text.length)
+        @type_current = nil
+      end
+      return true
     end
     return false
   end
