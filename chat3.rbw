@@ -104,7 +104,11 @@ class Chat3
           begin
             self.send("local_#{cmd}", body)
           rescue
-            add_error("local command '#{cmd}' generated an exception: #{$!}\n#{$@.join("\n")}")
+            if @var[:verbose_error]
+              add_error("local command '#{cmd}' generated an exception: #{$!}\n#{$@.join("\n")}")
+            else
+              add_error("#{$!}")
+            end
           end
         else
           add_error "invalid local command: '#{cmd}'"

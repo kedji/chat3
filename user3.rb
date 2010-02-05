@@ -118,6 +118,7 @@ def _adjust_presence(op, peer_keyhash, room, msg, notify = true)
               " room #{room}.", room
     elsif op == 'offline'
       _notice "#{peer_name} has disconnected#{msg}", :notice
+      @var[:presence].delete peer_keyhash
     elsif op == 'away' and prior != current
       _notice "#{peer_name} is away#{msg}", :notice
     elsif op == 'back' or current == 'online' and prior != current
@@ -240,6 +241,55 @@ end
 def local_reload(body)
   load_command_methods()
   _notice "command methods reloaded", :notice
+end
+
+
+# Rename yourself (one argument - your new name) or someone else (two
+# arguments - old name, new name).
+def local_nick(body)
+  name1 = _pop_token(body)
+  name2 = _pop_token(body)
+  raise "Usage: /nick <old_name> <new_name>" if name1.to_s.empty?
+  if name2.to_s.empty?
+    name2 = name1
+    name1 = @var[:our_name]
+  end
+  raise "Name '#{name2}' is already in use" if @var[:user_keys][name2]
+
+  # Perform the renaming
+  kh = @connection.comm.sender_keyhash(name1)
+  key = @connection.comm.rsa_keys[name1]
+  raise "Invalid user name: '#{name1}'" unless kh and key
+  @connection.comm.rsa_keys[name2] = key
+  @connection.comm.rsa_keys.delete(name1)
+  @connection.comm.names[kh] = name2
+  @var[:user_keys][name2] = key
+  @var[:user_keys].delete name1
+  @var[:granted].collect! { |x| x = name2 if x == name1 ; x }
+  @var[:granted_by].collect! { |x| x = name2 if x == name1 ; x }
+  @var[:revoked].collect! { |x| x = name2 if x == name1 ; x }
+  
+  # And lastly, if this is us, update our special name attribute
+  @var[:our_name] = name2 if @var[:our_name] == name1
+  _notice("#{name1} is now known as #{name2}")
+  _save_env
+end
+
+
+# Display a list of users you know and their key status.  No arguments.
+def local_keys(body)
+  _notice("Name:      RSA Fingerprint:         Status:")
+  @var[:user_keys].each do |name,key|
+    key_hash = MD5::digest(key)[0,8]
+    fingerprint = []
+    key_hash.each_byte { |x| fingerprint << ("%02x" % x) }
+    fingerprint = fingerprint.join(' ')
+    status = []
+    status << "Granted" if @var[:granted].include?(name)
+    status << "Revoked" if @var[:revoked].include?(name)
+    status << @var[:presence][key_hash].first if @var[:presence][key_hash]
+    _notice("#{(name+(' '*10))[0,10]} #{fingerprint}  #{status.join(', ')}")
+  end
 end
 
 
