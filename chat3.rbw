@@ -12,8 +12,96 @@ require 'client3.rb'
 $LOAD_PATH.push FILE_DIRECTORY
 require 'chat_window.rb'
 
+#require 'rsa.rb'
+
 # Ruby tool used to grab the source of included files, not just their content
 SCRIPT_LINES__ = {}
+
+RSA_BITS = 5080
+
+# This is the dialog which pops up if you don't have a key
+# (usually the first time you run chat)
+class WelcomeBox < FXDialogBox
+  attr_accessor :username
+  def initialize(parent)
+    @username = ""
+    # Window decoration options
+    super(parent, "Welcome to Chat 3.0", DECOR_TITLE|DECOR_BORDER|LAYOUT_FIX_WIDTH|LAYOUT_FIX_HEIGHT)
+    
+    # Main dialog frame
+    frame = FXVerticalFrame.new(self, LAYOUT_FILL_X|LAYOUT_FILL_Y)    
+    
+    # Informational text
+    text = "Welcome to Chat!\n\n" +
+     "You must first enter a username and generate an encryption key.\n\n" +
+     "Your username must comprise only letters, numbers, and underscore,\n" +
+     "and be at least 3 characters long.\n\n" +
+     "Generating an encryption key often takes about 30 minutes."
+    infoText = FXLabel.new(frame, text, nil, LAYOUT_CENTER_X)
+    
+    # Username text and box
+    unameText = FXLabel.new(frame, "Unique Username:", nil, LAYOUT_CENTER_X)
+    unameField = FXTextField.new(frame, 20, nil, 0, TEXTFIELD_NORMAL|LAYOUT_CENTER_X|TEXTFIELD_LIMITED)
+    
+    # More informational text
+    moreText = FXLabel.new(frame, "Click [Generate] to proceed, or [Exit] to quit.\n", nil, LAYOUT_CENTER_X)
+    
+    # Buttons subframe
+    bFrame = FXHorizontalFrame.new(frame, LAYOUT_FILL_X)
+    
+    # Generate Key Button and handler
+    genButton = FXButton.new(bFrame, "Generate", nil, nil, 0, BUTTON_NORMAL|LAYOUT_CENTER_X, 0, 0, 75, 20)
+    genButton.connect(SEL_COMMAND) do 
+      # quick test to see if the username is valid...
+      if not isValid?(unameField.text)
+        text = "Username may comprise only alphanumeric and underscore\nand must be longer than 2 characters."
+        FXMessageBox.error(self, MBOX_OK, "Error", text)
+      else # username is valid
+        @username = unameField.text # needs to be accessible to calling code 
+        self.handle(self, MKUINT(FXDialogBox::ID_ACCEPT, SEL_COMMAND), nil)
+      end
+    end
+    
+    # Exit Button and handler
+    exitButton = FXButton.new(bFrame, "Exit", nil, nil, 0, BUTTON_NORMAL|LAYOUT_CENTER_X, 0, 0, 75, 20)
+    exitButton.connect(SEL_COMMAND) do 
+      self.handle(self, MKUINT(FXDialogBox::ID_CANCEL, SEL_COMMAND), nil)
+    end
+  end 
+  
+  private
+  # helper function to see if username meets character requirements
+  def isValid?(username)
+    # allow only these characters
+    valid = ("a".."z").to_a + ("A".."Z").to_a + ("0".."9").to_a + "_".to_a 
+    return false if username.length < 3
+    username.each_byte {|c| return false if not valid.include?(c.chr)}
+    return true
+  end
+  
+end
+
+# This is the dialog which pops up while your key is being generated
+class KeyGenBox < FXDialogBox
+  def initialize(app)	
+    super(app, "Generating Your Key")
+    # Progress bar
+    bar = FXProgressBar.new(self, nil, 0, LAYOUT_FILL_X)
+    bar.total = 100
+    # Text
+    infoText = FXLabel.new(self, "This often takes about 30 minutes")
+    # Cancel button & handler
+    cancelButton = FXButton.new(self, "Cancel", nil, nil, 0, BUTTON_NORMAL|LAYOUT_CENTER_X)
+    cancelButton.connect(SEL_COMMAND) do 
+      Kernel.exit(0) # Allow users to quit
+    end
+    # Imitate Windows progressbar behavior
+    app.addTimeout(250, :repeat => true) do
+      bar.progress += rand(10) - bar.progress/10
+    end
+  end
+end
+
 
 class Chat3
 
@@ -35,7 +123,6 @@ class Chat3
       end
     end
     load_command_methods()
-    dispatch(:startup)
   end
 
   def connect(addr, port)
@@ -45,6 +132,7 @@ class Chat3
 
   def run
     @fox_app.create
+    dispatch(:startup)
     @fox_app.run
     @connection.disconnect
   end
@@ -125,11 +213,31 @@ class Chat3
   end
 
   # This method gets invoked if the local user's environment file (env.yml)
-  # does not contain their username and public/private RSA key pair.  This
-  # method should prompt for a (unique) username, and then generate an RSA
-  # keypair, and return all three:  username, pub_rsa, prv_rsa
+  # does not contain their username and public/private RSA key pair.
   def keygen_tool
-    return nil, nil, nil    # ADD CODE HERE
+    # Spawn a welcome & get username box
+    welcomeBox = WelcomeBox.new(@fox_app)
+    welcomeBox.create
+    
+    # Execute box, bail if 'Exit' is clicked
+    Kernel.exit(0) if welcomeBox.execute(PLACEMENT_OWNER) == 0
+
+    # Otherwise, "Generate Key" must have been clicked, so do that.
+    waitBox = KeyGenBox.new(@fox_app)
+    waitBox.create
+    waitThread = Thread.new{waitBox.execute(PLACEMENT_OWNER)}
+    
+    # Acutally generate the RSA keypair here
+    keys = Key.new
+    pub_rsa, prv_rsa = Key.keygen(RSA_BITS)
+    
+    # Key is done; close waitBox
+    waitThread.kill
+    waitBox.handle(waitBox, MKUINT(FXDialogBox::ID_CANCEL, SEL_COMMAND), nil)
+    
+    # Notify user that their keys are done 
+    FXMessageBox.information(@fox_app, MBOX_OK, "Key Generated", "You may now use Chat.") 
+    return welcomeBox.username, pub_rsa, prv_rsa
   end
 
   # Load methods which can be used for /cmd commands
@@ -186,3 +294,5 @@ end  # of class Chat3
 
 client = Chat3.new
 client.run
+
+
