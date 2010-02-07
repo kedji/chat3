@@ -695,7 +695,9 @@ def event_startup()
   # Generate a random AES session key first thing
   @connection.comm.keyring.rekey!
 
-  # Load our environment variables
+  # Set our defaults and then load our environment variables
+  @var[:last_connection] = [ 'chat30.no-ip.org', 9000 ]
+  @var[:auto_connect] = true        # We should connect on startup by default
   @var[:user_keys] = {}             # Maps usernames to full public keys
   @var[:last_ping] = Time.now       # Reset our ping counter
   @var[:timestamp] = "(%H:%M)"      # Default chat timestamp

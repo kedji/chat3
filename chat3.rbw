@@ -233,21 +233,21 @@ class Chat3
     Kernel.exit(0) if welcome_box.execute(PLACEMENT_OWNER) == 0
 
     # Otherwise, "Generate Key" must have been clicked, so do that.
-    wait_box = KeyGenBox.new(@fox_app)
-    wait_box.create
-    wait_thread = Thread.new { wait_box.execute(PLACEMENT_OWNER) }
+    #wait_box = KeyGenBox.new(@fox_app)
+    #wait_box.create
+    #wait_thread = Thread.new { wait_box.execute(PLACEMENT_OWNER) }
     
     # Acutally generate the RSA keypair here
     keys = Key.new
     pub_rsa, prv_rsa = Key.keygen(RSA_BITS)
     
     # Key is done; close waitBox
-    wait_thread.kill
-    wait_box.handle(wait_box, MKUINT(FXDialogBox::ID_CANCEL, SEL_COMMAND), nil)
+    #wait_thread.kill
+    #wait_box.handle(wait_box, MKUINT(FXDialogBox::ID_CANCEL, SEL_COMMAND), nil)
     
     # Notify user that their keys are done 
-    FXMessageBox.information(@fox_app, MBOX_OK, "Congratulations!",
-      "You're all done.  Enjoy Chat 3.0")
+    #FXMessageBox.information(@fox_app, MBOX_OK, "Congratulations!",
+    #  "You're all done.  Click OK to connect.")
     return welcome_box.username, pub_rsa.to_s, prv_rsa.to_s
   end
 
