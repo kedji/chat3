@@ -255,11 +255,11 @@ class Chat3
   def load_command_methods()
     begin
       # Add all the newly-defined methods to our call list
-      mlist = self.methods     # Get the current list of methods
-      load 'user3.rb'          # install the user-defined methods
-      load 'guser3.rb'         # install the GUI extensions
+      @mlist ||= []
       begin
-        load 'local.rb'        # methods local to the user
+        load 'user3.rb'          # install the user-defined methods
+        load 'guser3.rb'         # install the GUI extensions
+        load 'local.rb'          # methods local to the user
       rescue LoadError; end
 
       # Load in the included files' code, but only once
@@ -269,7 +269,8 @@ class Chat3
           @var[:script_lines] += v if k.include? 'user3.rb'
         end
       end
-      new_methods = self.methods.select { |m| not mlist.include? m }
+      new_methods = self.methods.select { |m| not @mlist.include? m }
+      @mlist = self.methods
 
       # Find, translate and add any new user commands
       @cmds += new_methods.select { |m| m =~ /^local_/ }
@@ -302,6 +303,10 @@ class Chat3
   end
 
 end  # of class Chat3
+
+# For the sake of the aggregator, require these here
+require 'user3.rb'
+require 'guser3.rb'
 
 client = Chat3.new
 client.run

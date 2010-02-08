@@ -241,7 +241,7 @@ class ChatWindow < FXMainWindow
 
 end  # of class ChatWindow
 
-
+#### Do not include below this line - TESTING ONLY ####
 if __FILE__ == $0
   FXApp.new do |app|
     ChatWindow.new(app)

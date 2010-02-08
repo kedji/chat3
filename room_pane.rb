@@ -163,7 +163,7 @@ class RoomPane < FXPacker
 end  # of class RoomPane
 
 
-###  TESTING ONLY  ###
+#### Do not include below this line - TESTING ONLY ####
 if __FILE__ == $0
   FXApp.new do |app|
     main = FXMainWindow.new(app, "Room Pane Test", :width => 480,
