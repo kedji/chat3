@@ -162,8 +162,12 @@ class Chat3
         begin
           self.send("remote_#{cmd}", sender, body)
         rescue
-          add_error("remote command from #{sender} (#{cmd}) failed: #{$!}\n" +
-                    "#{$@.join("\n")}")
+          if @var[:verbose_error]
+            add_error("remote command from #{sender} (#{cmd}) failed: #{$!}" +
+                      "\n#{$@.join("\n")}")
+          else
+            add_error("remote command from #{sender} (#{cmd}) failed: #{$!}")
+          end
         end
       else
         add_error "received invalid control from #{sender}: '#{cmd}'"

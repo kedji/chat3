@@ -498,26 +498,39 @@ def remote_name(sender, body)
       @var[:logged_in] = 1
     end
   else
-    if @connection.comm.rsa_keys[params.last] and
-       @connection.comm.rsa_keys[params.last] != params.first
-      raise "User spoofing detected!  #{params.last} tried to sign on " +
-            "with an invalid key (#{fingerprint})."
-    end
+    # Try to log in the user by their key first
     name = _user_name(key_hash)
     if name != 'unknown_user'
       _notice "Trusted user #{name} has connected.", 'chat'
       local_grant(name) unless @var[:revoked].include?(name)
-    else
-      name = params.last
-      @connection.comm.rsa_keys[name] = params.first
-      @connection.comm.names[key_hash] = name
+      return nil
+    end
+
+    # Detect someone signing on with a new key and an old name (spoofing)
+    if @connection.comm.rsa_keys[params.last] and
+       @connection.comm.rsa_keys[params.last] != params.first
+
+      # User spoofing has been detected.  Give the user a temporary name.
+      tmp_name = "fake_#{params.last}"
+      tmp_name += ("_%02x" % rand(256)) if @connection.comm.rsa_keys[tmp_name]
+      add_error("User spoofing detected!  #{params.last} tried to sign on " +
+                "with an invalid key (#{fingerprint}). Renaming to #{tmp_name}")
+      params << tmp_name
+    end
+
+    # Whether spoofing has been detected or not, let's give the person a
+    # name and a key entry.
+    name = params.last
+    @connection.comm.rsa_keys[name] = params.first
+    @connection.comm.names[key_hash] = name
+    if params.length == 2
       _notice "Someone claiming to be #{name} has connected (#{fingerprint})",
               'chat'
+    end
 
-      # Should we auto-grant them?
-      unless @var[:revoked].include?(name)
-        local_grant(name) if @var[:auto_grant]
-      end
+    # Should we auto-grant them?
+    unless @var[:revoked].include?(name)
+      local_grant(name) if @var[:auto_grant]
     end
   end
 end
@@ -532,13 +545,15 @@ def remote_grant(sender, body)
   rsa_key = _pop_token(body)
   fingerprint = []
   key_hash = MD5::digest(rsa_key)[0,8]
+
+  # Remote user's data/presence
   key_hash.each_byte { |x| fingerprint << ("%02x" % x) }
   fingerprint = fingerprint.join(' ')
   _adjust_presence('online', key_hash, EMPTY_ROOM, '', false)
   _adjust_presence('join',   key_hash, EMPTY_ROOM, '', false)
 
   # Are we getting an AES key from another instance of our account?
-  if _user_keyhash(sender) == @connection.comm.our_keyhash
+  if key_hash == @connection.comm.our_keyhash
     unless @connection.comm.keyring.ring[key_id]
       local_grant(sender)
       @connection.comm.keyring.add_key(key_id, aes_key)
@@ -550,14 +565,20 @@ def remote_grant(sender, body)
   # Are we getting this key from a trusted user?
   if _user_keyhash(sender)
     if _user_keyhash(sender) != key_hash
-
       known = []
+
+      # Calculate the keyhash we have for this user
       _user_keyhash(sender).each_byte { |x| known << ("%02x" % x) }
       known = known.join(' ')
+
+      # Give the suspicious remote user a suspicious-sounding name
+      tmp_name = "fake_#{sender}"
+      tmp_name += ("_%02x" % rand(256)) if @connection.comm.rsa_keys[tmp_name]
       _notice("User #{sender} (claiming to be #{peer}) has sent you a " +
               "public key you don't recognize.  Fingerprint is " +
-              "(#{fingerprint}), expected (#{known})", :notice)
-      return nil
+              "(#{fingerprint}), expected (#{known}).  Renaming this user " +
+              "to #{tmp_name}", :notice)
+      sender = tmp_name
     end
     peer = sender
     unless @var[:granted_by].include? peer
@@ -574,6 +595,22 @@ def remote_grant(sender, body)
 
   # We don't know exactly who sent us this key, do we?
   else
+    # Wait a minute, does this "new" user have a name we know?  That's weird!
+    # Give the suspicious remote user a suspicious-sounding name!
+    if @connection.comm.rsa_keys[peer]
+      known = []
+      _user_keyhash(peer).each_byte { |x| known << ("%02x" % x) }
+      known = known.join(' ')
+      tmp_name = "fake_#{peer}"
+      tmp_name += ("_%02x" % rand(256)) if @connection.comm.rsa_keys[tmp_name]
+      _notice("'New' user claiming to be #{peer} has sent you a " +
+              "public key you don't recognize.  Fingerprint is " +
+              "(#{fingerprint}), expected (#{known}).  Renaming this user " +
+              "to #{tmp_name}", :notice)
+      peer = tmp_name
+    end
+
+    # Add their key (we'll take keys from anyone) and reciprocate if needed.
     @connection.comm.rsa_keys[peer] = rsa_key
     @connection.comm.names[key_hash] = peer
     _notice "You were granted access by new user #{peer} (#{fingerprint})"
