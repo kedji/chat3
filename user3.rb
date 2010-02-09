@@ -52,6 +52,16 @@ def _notice(msg, type = :notice)
 end
 
 
+# Convert a key-hash into a fingerprint using the standard Chat 3.0 format
+def _fingerprint(key_hash)
+  fp = []
+  key_hash.each_byte { |x| fp << ("%02x" % x) }
+  ret = []
+  4.times { ret << fp.shift + fp.shift }
+  ret.join(' ')
+end
+
+
 # We're resetting all of our network state for a reconnection
 def _network_init
   # Flush out all blacklisted state
@@ -278,17 +288,19 @@ end
 
 # Display a list of users you know and their key status.  No arguments.
 def local_keys(body)
-  _notice("Name:      RSA Fingerprint:         Status:")
+  _notice("Name:        RSA Fingerprint:      Status:")
   @var[:user_keys].each do |name,key|
     key_hash = MD5::digest(key)[0,8]
-    fingerprint = []
-    key_hash.each_byte { |x| fingerprint << ("%02x" % x) }
-    fingerprint = fingerprint.join(' ')
+    fingerprint = _fingerprint(key_hash)
     status = []
-    status << "Granted" if @var[:granted].include?(name)
-    status << "Revoked" if @var[:revoked].include?(name)
-    status << @var[:presence][key_hash].first if @var[:presence][key_hash]
-    _notice("#{(name+(' '*10))[0,10]} #{fingerprint}  #{status.join(', ')}")
+    status = [ "Granted" ] if @var[:granted].include?(name)
+    status = [ "Revoked" ] if @var[:revoked].include?(name)
+    if @var[:presence][key_hash]
+      status << @var[:presence][key_hash].first
+    else
+      status << "offline"
+    end
+    _notice("#{(name+(' '*12))[0,12]} #{fingerprint}   #{status.join(', ')}")
   end
 end
 
@@ -485,9 +497,7 @@ def remote_name(sender, body)
   return nil unless params.length == 2 and params.first =~ /[0-9a-f]+:[0-9a-f]+/
   local_rekey('')
   key_hash = MD5::digest(params.first)[0,8]
-  fingerprint = []
-  key_hash.each_byte { |x| fingerprint << ("%02x" % x) }
-  fingerprint = fingerprint.join(' ')
+  fingerprint = _fingerprint(key_hash)
   if key_hash == @connection.comm.our_keyhash
     if @var[:logged_in]
       _notice "Your account has connected from another location.", :notice
@@ -543,12 +553,10 @@ def remote_grant(sender, body)
   aes_key = _pop_token(body)
   peer    = _pop_token(body)
   rsa_key = _pop_token(body)
-  fingerprint = []
   key_hash = MD5::digest(rsa_key)[0,8]
 
   # Remote user's data/presence
-  key_hash.each_byte { |x| fingerprint << ("%02x" % x) }
-  fingerprint = fingerprint.join(' ')
+  fingerprint = _fingerprint(key_hash)
   _adjust_presence('online', key_hash, EMPTY_ROOM, '', false)
   _adjust_presence('join',   key_hash, EMPTY_ROOM, '', false)
 
@@ -565,11 +573,9 @@ def remote_grant(sender, body)
   # Are we getting this key from a trusted user?
   if _user_keyhash(sender)
     if _user_keyhash(sender) != key_hash
-      known = []
 
       # Calculate the keyhash we have for this user
-      _user_keyhash(sender).each_byte { |x| known << ("%02x" % x) }
-      known = known.join(' ')
+      known = _fingerprint(_user_keyhash(sender))
 
       # Give the suspicious remote user a suspicious-sounding name
       tmp_name = "fake_#{sender}"
@@ -598,9 +604,7 @@ def remote_grant(sender, body)
     # Wait a minute, does this "new" user have a name we know?  That's weird!
     # Give the suspicious remote user a suspicious-sounding name!
     if @connection.comm.rsa_keys[peer]
-      known = []
-      _user_keyhash(peer).each_byte { |x| known << ("%02x" % x) }
-      known = known.join(' ')
+      known = _fingerprint(_user_keyhash(peer))
       tmp_name = "fake_#{peer}"
       tmp_name += ("_%02x" % rand(256)) if @connection.comm.rsa_keys[tmp_name]
       _notice("'New' user claiming to be #{peer} has sent you a " +
@@ -734,6 +738,7 @@ def event_startup()
 
   # Set our defaults and then load our environment variables
   @var[:last_connection] = [ 'chat30.no-ip.org', 9000 ]
+  @var[:auto_grant] = true          # We automatically give our key to new users
   @var[:auto_connect] = true        # We should connect on startup by default
   @var[:user_keys] = {}             # Maps usernames to full public keys
   @var[:last_ping] = Time.now       # Reset our ping counter

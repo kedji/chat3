@@ -7,10 +7,12 @@
 
 # Communication abstraction layer for Chat 3.0 - used by both the client and
 # the server.
-# Last revision:  Dec 4, 2009
+# Last revision:  Feb 9, 2009
 
-#FILE_DIRECTORY = (File.join(File.expand_path('~'), '.sechat') rescue '.')
-FILE_DIRECTORY = '.'
+# Find the file directory
+fdir = (File.join(File.expand_path('~'), '.sechat') rescue '.')
+fdir = ENV['CHAT30DIR'] if ENV['CHAT30DIR']
+FILE_DIRECTORY = fdir
 
 require 'socket'
 require 'openssl'
