@@ -30,10 +30,12 @@ $LOAD_PATH.push File.dirname(__FILE__)
 
 # Communication abstraction layer for Chat 3.0 - used by both the client and
 # the server.
-# Last revision:  Dec 4, 2009
+# Last revision:  Feb 9, 2009
 
-#FILE_DIRECTORY = (File.join(File.expand_path('~'), '.sechat') rescue '.')
-FILE_DIRECTORY = '.'
+# Find the file directory
+fdir = (File.join(File.expand_path('~'), '.sechat') rescue '.')
+fdir = ENV['CHAT30DIR'] if ENV['CHAT30DIR']
+FILE_DIRECTORY = fdir
 
 require 'socket'
 require 'openssl'
@@ -1076,6 +1078,186 @@ end  # of class RoomPane
 
 
 #### End of aggregated 'room_pane.rb' ####
+#### Aggregator included 'whiteboard_pane.rb' ####
+#!/usr/bin/env ruby
+
+# Copyright notice:
+#  (C) 2009-2010
+# This software is provided 'as-is' without any express or implied warranty.
+# In no event will the authors be held liable for damages arising from the
+# use of this software.  All license is reserved.
+
+####  Whiteboard Protocol  ####
+# Whiteboard messages are a space-delimited set of commands.  Commands are
+# made up of a type-byte and then a comma-delimited set of values.  As an
+# example, here's a message containing two line commands:
+# "L10,20,15,25 L15,20,10,25"
+# The 'L' character specifies that each command is a line, and the LINE
+# command takes four integer values - x1,y1,x2,y2.
+
+require 'rubygems' rescue nil
+require 'fox16'
+require 'fox16/colors'
+
+include Fox
+
+class WhiteboardPane < FXPacker
+  BOARD_WIDTH      = 480     # Initial window width
+  BOARD_HEIGHT     = 320     # Initial window height
+  IMG_WIDTH        = 1920    # Maximum width of our canvas
+  IMG_HEIGHT       = 1080    # Maximum height of our canvas
+  BUTTON_WIDTH     = 70
+  BACK_COLOR       = 0xffffffff
+  FRONT_COLOR      = 0xfff0000f
+  BUFFER_TIME      = 1.1     # Seconds for which we buffer
+
+  def initialize(parent, skin = {})
+    super(parent, :opts => LAYOUT_FILL)
+    @mouse_down = false
+    @cmds = []
+    @cmd_time = nil
+    @colors = { 'R' => 0xff0000ff,
+                'B' => 0xfff0000f,
+                'G' => 0xff00aa00,
+                'D' => 0xff000000 }
+    @color = 'D'
+
+    # We may want a 2-pixel border on the inside-top of this pane, otherwise
+    # no borders.
+    self.padLeft = self.padBottom = self.padRight = self.padTop = 0
+
+    # Draw the top-level board
+    frames = FXPacker.new(self, :opts => LAYOUT_FILL)
+
+    # Buttons go on the right
+    button_list = FXPacker.new(frames, :opts => LAYOUT_FILL_Y |
+      LAYOUT_SIDE_RIGHT | LAYOUT_FIX_WIDTH, :width => BUTTON_WIDTH)
+    button_clear = FXButton.new(button_list, "Clear", :opts => FRAME_RAISED |
+      FRAME_THICK | LAYOUT_FILL_X | LAYOUT_SIDE_TOP)
+    button_clear.connect(SEL_COMMAND) { clear_board }
+
+    # Now draw the color buttons
+    @colors.each do |c,v|
+      button = FXButton.new(button_list, " ", :opts => FRAME_RAISED |
+        FRAME_THICK | LAYOUT_FILL_X | LAYOUT_SIDE_TOP)
+      button.connect(SEL_COMMAND) { @color = c }
+      button.backColor = v
+    end
+
+    # Exit button at the bottom all by itself
+    button_bye = FXButton.new(button_list, "Close", :opts => FRAME_RAISED |
+      FRAME_THICK | LAYOUT_FILL_X | LAYOUT_SIDE_BOTTOM)
+    button_bye.connect(SEL_COMMAND) { @on_line_block.call('/leave') }
+
+    # Drawing area goes on the left
+    cframe = FXHorizontalFrame.new(frames, :opts => LAYOUT_FILL | FRAME_SUNKEN |
+      FRAME_THICK | LAYOUT_SIDE_LEFT, :padLeft => 0, :padRight => 0,
+      :padTop => 0, :padBottom => 0, :hSpacing => 0, :vSpacing => 0)
+    @canvas = FXCanvas.new(cframe, :opts => LAYOUT_FILL)
+    @canvas.connect(SEL_PAINT, method(:board_draw))
+    @canvas.connect(SEL_LEFTBUTTONPRESS, method(:left_button_down))
+    @canvas.connect(SEL_LEFTBUTTONRELEASE, method(:left_button_up))
+    @canvas.connect(SEL_MOTION, method(:mouse_motion))
+
+    # Backup of the canvas on which we're drawing
+    @image = FXImage.new(app, :width => 1920, :height => 1080)
+    @image.create
+    FXDCWindow.new(@image) do |dc|
+      dc.foreground = BACK_COLOR
+      dc.fillRectangle(0, 0, 1920, 1080)
+    end
+  end
+
+  # Redraw the whole board?  Restore an image?
+  def board_draw(*params)
+    FXDCWindow.new(@canvas) do |dc|
+      dc.drawImage(@image, 0, 0)
+    end
+  end
+
+  # Clear the whole board (local only)
+  def clear_board
+    FXDCWindow.new(@image) do |dc|
+      dc.foreground = BACK_COLOR
+      dc.fillRectangle(0, 0, IMG_WIDTH, IMG_HEIGHT)
+    end
+    board_draw
+  end
+
+  # This object generates only one synthetic event - character strings
+  # "typed" by the user.
+  def on_line(&blk)
+    @on_line_block = blk
+  end
+
+  # The left mouse button has been pressed
+  def left_button_down(sender, selector, event)
+    @canvas.grab
+    @mouse_down = true
+  end
+
+  # The left mouse button has been released
+  def left_button_up(sender, selector, event)
+    @canvas.ungrab
+    @mouse_down = false
+    flush_commands
+    board_draw
+  end
+
+  # The mouse has moved.  Do something if the button is down
+  def mouse_motion(sender, selector, event)
+    return nil unless @mouse_down
+
+    # Draw the temporary line just for immediate user feedback
+    FXDCWindow.new(@canvas) do |dc|
+      dc.foreground = @colors[@color]
+      dc.drawLine(event.last_x, event.last_y, event.win_x, event.win_y)
+    end
+
+    # Draw the permanent line to our buffer
+    FXDCWindow.new(@image) do |dc|
+      dc.foreground = @colors[@color]
+      dc.drawLine(event.last_x, event.last_y, event.win_x, event.win_y)
+    end
+
+    # Now send the line to the room
+    buffer_command("L,#{@color},#{event.last_x},#{event.last_y}" +
+                   ",#{event.win_x},#{event.win_y}")
+    true
+  end
+
+  # Buffer commands so we can send them in chunks
+  def buffer_command(cmd)
+    @cmd_time ||= Time.now.to_f
+    @cmds << cmd
+    flush_commands if Time.now.to_f - @cmd_time > BUFFER_TIME
+  end
+
+  # Send all the buffered commands, if any
+  def flush_commands
+    @cmd_time = nil
+    @on_line_block.call(@cmds.join(' ')) unless @cmds.empty?
+    @cmds = []
+  end
+
+  # We've gotten a list of drawing commands from the room.  Let's draw them!
+  def disp(text)
+    FXDCWindow.new(@image) do |dc|
+      text.split(' ').each do |cmd|
+        cmd = cmd.split(',')
+        if cmd.first == 'L'
+          dc.foreground = @colors[cmd[1]].to_i
+          dc.drawLine(cmd[2].to_i, cmd[3].to_i + 1, cmd[4].to_i, cmd[5].to_i + 1)
+        end
+      end
+    end
+    board_draw
+  end
+
+end  # of class WhiteboardPane
+
+
+#### End of aggregated 'whiteboard_pane.rb' ####
 
 include Fox
 
@@ -1228,16 +1410,26 @@ class ChatWindow < FXMainWindow
     end
   end
 
-  # Adding a new tab and switcher element
-  def new_tab(name)
+  # Adding a new tab and switcher element.  Optionally you can specify a
+  # class (a pane type) which will be spawned.  RoomPane is spawned by default.
+  # Checks for duplicates automatically.
+  def new_tab(name, klass = RoomPane)
+    # Don't do anything if we already have this tab
+    @channels.each { |cname,_| return nil if cname == name }
+
+    # Add the visual indication of this tab
     @tab_names << FXTabItem.new(@tabs, name, nil)
     empty = FXPacker.new(@tabs)
     empty.padBottom = empty.padTop = empty.padLeft = empty.padRight = 0
     @empties << empty
-    new_channel = RoomPane.new(@switcher, @skin)
+
+    # Create the content of this channel - probably a RoomPane
+    new_channel = klass.new(@switcher, @skin)
     @channels << [ name, new_channel ]
     new_channel.create
-    new_channel.on_line(&@on_line_block)
+    new_channel.on_line(&@on_line_block)   # register our callback function
+
+    # Show the tabs (if so desired) now that we know we have more than one.
     (@tabs.create ; @tabs.show) if @skin[:show_tabs]
   end
 
@@ -1303,8 +1495,6 @@ class ChatWindow < FXMainWindow
 end  # of class ChatWindow
 
 #### End of aggregated 'chat_window.rb' ####
-
-#require 'rsa.rb'
 
 # Ruby tool used to grab the source of included files, not just their content
 SCRIPT_LINES__ = {}
@@ -1405,6 +1595,8 @@ class KeyGenBox < FXDialogBox
 end
 
 
+# The top-level Chat 3.0 client class.  Methods in user3.rb and guser3.rb are
+# defined in the scope of this class.
 class Chat3
 
   def initialize
@@ -1454,8 +1646,12 @@ class Chat3
         begin
           self.send("remote_#{cmd}", sender, body)
         rescue
-          add_error("remote command from #{sender} (#{cmd}) failed: #{$!}\n" +
-                    "#{$@.join("\n")}")
+          if @var[:verbose_error]
+            add_error("remote command from #{sender} (#{cmd}) failed: #{$!}" +
+                      "\n#{$@.join("\n")}")
+          else
+            add_error("remote command from #{sender} (#{cmd}) failed: #{$!}")
+          end
         end
       else
         add_error "received invalid control from #{sender}: '#{cmd}'"
@@ -1525,21 +1721,16 @@ class Chat3
     Kernel.exit(0) if welcome_box.execute(PLACEMENT_OWNER) == 0
 
     # Otherwise, "Generate Key" must have been clicked, so do that.
-    #wait_box = KeyGenBox.new(@fox_app)
-    #wait_box.create
-    #wait_thread = Thread.new { wait_box.execute(PLACEMENT_OWNER) }
+    wait_box = KeyGenBox.new(@fox_app)
+    wait_box.create
+    wait_thread = Thread.new { wait_box.execute(PLACEMENT_OWNER) }
     
     # Acutally generate the RSA keypair here
     keys = Key.new
     pub_rsa, prv_rsa = Key.keygen(RSA_BITS)
     
     # Key is done; close waitBox
-    #wait_thread.kill
-    #wait_box.handle(wait_box, MKUINT(FXDialogBox::ID_CANCEL, SEL_COMMAND), nil)
-    
-    # Notify user that their keys are done 
-    #FXMessageBox.information(@fox_app, MBOX_OK, "Congratulations!",
-    #  "You're all done.  Click OK to connect.")
+    wait_box.close
     return welcome_box.username, pub_rsa.to_s, prv_rsa.to_s
   end
 
@@ -1649,6 +1840,16 @@ def _notice(msg, type = :notice)
   else
     add_msg("* #{msg}", type)
   end
+end
+
+
+# Convert a key-hash into a fingerprint using the standard Chat 3.0 format
+def _fingerprint(key_hash)
+  fp = []
+  key_hash.each_byte { |x| fp << ("%02x" % x) }
+  ret = []
+  4.times { ret << fp.shift + fp.shift }
+  ret.join(' ')
 end
 
 
@@ -1878,17 +2079,19 @@ end
 
 # Display a list of users you know and their key status.  No arguments.
 def local_keys(body)
-  _notice("Name:      RSA Fingerprint:         Status:")
+  _notice("Name:        RSA Fingerprint:      Status:")
   @var[:user_keys].each do |name,key|
     key_hash = MD5::digest(key)[0,8]
-    fingerprint = []
-    key_hash.each_byte { |x| fingerprint << ("%02x" % x) }
-    fingerprint = fingerprint.join(' ')
+    fingerprint = _fingerprint(key_hash)
     status = []
-    status << "Granted" if @var[:granted].include?(name)
-    status << "Revoked" if @var[:revoked].include?(name)
-    status << @var[:presence][key_hash].first if @var[:presence][key_hash]
-    _notice("#{(name+(' '*10))[0,10]} #{fingerprint}  #{status.join(', ')}")
+    status = [ "Granted" ] if @var[:granted].include?(name)
+    status = [ "Revoked" ] if @var[:revoked].include?(name)
+    if @var[:presence][key_hash]
+      status << @var[:presence][key_hash].first
+    else
+      status << "offline"
+    end
+    _notice("#{(name+(' '*12))[0,12]} #{fingerprint}   #{status.join(', ')}")
   end
 end
 
@@ -2019,7 +2222,7 @@ end
 
 # Join a chat room - one argument.
 def local_join(body)
-  room = body.dup
+  room = body.dup.sub('@', '')
   return nil unless room.length >= 1
   room_hash = MD5::digest(room)[0,8]
   room_hash = EMPTY_ROOM if room == 'chat'
@@ -2085,9 +2288,7 @@ def remote_name(sender, body)
   return nil unless params.length == 2 and params.first =~ /[0-9a-f]+:[0-9a-f]+/
   local_rekey('')
   key_hash = MD5::digest(params.first)[0,8]
-  fingerprint = []
-  key_hash.each_byte { |x| fingerprint << ("%02x" % x) }
-  fingerprint = fingerprint.join(' ')
+  fingerprint = _fingerprint(key_hash)
   if key_hash == @connection.comm.our_keyhash
     if @var[:logged_in]
       _notice "Your account has connected from another location.", :notice
@@ -2098,26 +2299,39 @@ def remote_name(sender, body)
       @var[:logged_in] = 1
     end
   else
-    if @connection.comm.rsa_keys[params.last] and
-       @connection.comm.rsa_keys[params.last] != params.first
-      raise "User spoofing detected!  #{params.last} tried to sign on " +
-            "with an invalid key (#{fingerprint})."
-    end
+    # Try to log in the user by their key first
     name = _user_name(key_hash)
     if name != 'unknown_user'
       _notice "Trusted user #{name} has connected.", 'chat'
       local_grant(name) unless @var[:revoked].include?(name)
-    else
-      name = params.last
-      @connection.comm.rsa_keys[name] = params.first
-      @connection.comm.names[key_hash] = name
+      return nil
+    end
+
+    # Detect someone signing on with a new key and an old name (spoofing)
+    if @connection.comm.rsa_keys[params.last] and
+       @connection.comm.rsa_keys[params.last] != params.first
+
+      # User spoofing has been detected.  Give the user a temporary name.
+      tmp_name = "fake_#{params.last}"
+      tmp_name += ("_%02x" % rand(256)) if @connection.comm.rsa_keys[tmp_name]
+      add_error("User spoofing detected!  #{params.last} tried to sign on " +
+                "with an invalid key (#{fingerprint}). Renaming to #{tmp_name}")
+      params << tmp_name
+    end
+
+    # Whether spoofing has been detected or not, let's give the person a
+    # name and a key entry.
+    name = params.last
+    @connection.comm.rsa_keys[name] = params.first
+    @connection.comm.names[key_hash] = name
+    if params.length == 2
       _notice "Someone claiming to be #{name} has connected (#{fingerprint})",
               'chat'
+    end
 
-      # Should we auto-grant them?
-      unless @var[:revoked].include?(name)
-        local_grant(name) if @var[:auto_grant]
-      end
+    # Should we auto-grant them?
+    unless @var[:revoked].include?(name)
+      local_grant(name) if @var[:auto_grant]
     end
   end
 end
@@ -2130,15 +2344,15 @@ def remote_grant(sender, body)
   aes_key = _pop_token(body)
   peer    = _pop_token(body)
   rsa_key = _pop_token(body)
-  fingerprint = []
   key_hash = MD5::digest(rsa_key)[0,8]
-  key_hash.each_byte { |x| fingerprint << ("%02x" % x) }
-  fingerprint = fingerprint.join(' ')
+
+  # Remote user's data/presence
+  fingerprint = _fingerprint(key_hash)
   _adjust_presence('online', key_hash, EMPTY_ROOM, '', false)
   _adjust_presence('join',   key_hash, EMPTY_ROOM, '', false)
 
   # Are we getting an AES key from another instance of our account?
-  if _user_keyhash(sender) == @connection.comm.our_keyhash
+  if key_hash == @connection.comm.our_keyhash
     unless @connection.comm.keyring.ring[key_id]
       local_grant(sender)
       @connection.comm.keyring.add_key(key_id, aes_key)
@@ -2151,13 +2365,17 @@ def remote_grant(sender, body)
   if _user_keyhash(sender)
     if _user_keyhash(sender) != key_hash
 
-      known = []
-      _user_keyhash(sender).each_byte { |x| known << ("%02x" % x) }
-      known = known.join(' ')
+      # Calculate the keyhash we have for this user
+      known = _fingerprint(_user_keyhash(sender))
+
+      # Give the suspicious remote user a suspicious-sounding name
+      tmp_name = "fake_#{sender}"
+      tmp_name += ("_%02x" % rand(256)) if @connection.comm.rsa_keys[tmp_name]
       _notice("User #{sender} (claiming to be #{peer}) has sent you a " +
               "public key you don't recognize.  Fingerprint is " +
-              "(#{fingerprint}), expected (#{known})", :notice)
-      return nil
+              "(#{fingerprint}), expected (#{known}).  Renaming this user " +
+              "to #{tmp_name}", :notice)
+      sender = tmp_name
     end
     peer = sender
     unless @var[:granted_by].include? peer
@@ -2174,6 +2392,20 @@ def remote_grant(sender, body)
 
   # We don't know exactly who sent us this key, do we?
   else
+    # Wait a minute, does this "new" user have a name we know?  That's weird!
+    # Give the suspicious remote user a suspicious-sounding name!
+    if @connection.comm.rsa_keys[peer]
+      known = _fingerprint(_user_keyhash(peer))
+      tmp_name = "fake_#{peer}"
+      tmp_name += ("_%02x" % rand(256)) if @connection.comm.rsa_keys[tmp_name]
+      _notice("'New' user claiming to be #{peer} has sent you a " +
+              "public key you don't recognize.  Fingerprint is " +
+              "(#{fingerprint}), expected (#{known}).  Renaming this user " +
+              "to #{tmp_name}", :notice)
+      peer = tmp_name
+    end
+
+    # Add their key (we'll take keys from anyone) and reciprocate if needed.
     @connection.comm.rsa_keys[peer] = rsa_key
     @connection.comm.names[key_hash] = peer
     _notice "You were granted access by new user #{peer} (#{fingerprint})"
@@ -2297,6 +2529,7 @@ def event_startup()
 
   # Set our defaults and then load our environment variables
   @var[:last_connection] = [ 'chat30.no-ip.org', 9000 ]
+  @var[:auto_grant] = true          # We automatically give our key to new users
   @var[:auto_connect] = true        # We should connect on startup by default
   @var[:user_keys] = {}             # Maps usernames to full public keys
   @var[:last_ping] = Time.now       # Reset our ping counter
@@ -2451,6 +2684,28 @@ end
 def local_close(body)
   body = @var[:room] if body.empty?
   @window.remove_tab(body)
+end
+
+
+# Spawn a whiteboard window and associate it to the given chat room.
+# Logic here should mirror local_join, except you can't join the main room
+# and a WhiteboardPand tab is automatically created.  We also don't invite
+# other instances of ourselves - that'd be weird!
+def local_whiteboard(body)
+  room = body.dup.sub('@', '')
+  return nil unless room.length >= 1
+  room_hash = MD5::digest(room)[0,8]
+  raise "Can't whiteboard main room" if room == 'chat' or
+                                        room_hash == EMPTY_ROOM
+
+  # Spawn our whiteboard window
+  @window.new_tab(room, WhiteboardPane)
+
+  # Connect to the room on the network
+  @connection.room_names[room_hash] = room
+  @connection.room_ids[room] = room_hash
+  _server_control('join', room_hash)
+  local_switch(room.dup)
 end
 
 
