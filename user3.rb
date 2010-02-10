@@ -431,7 +431,7 @@ end
 
 # Join a chat room - one argument.
 def local_join(body)
-  room = body.dup
+  room = body.dup.sub('@', '')
   return nil unless room.length >= 1
   room_hash = MD5::digest(room)[0,8]
   room_hash = EMPTY_ROOM if room == 'chat'

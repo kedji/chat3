@@ -64,6 +64,28 @@ def local_close(body)
 end
 
 
+# Spawn a whiteboard window and associate it to the given chat room.
+# Logic here should mirror local_join, except you can't join the main room
+# and a WhiteboardPand tab is automatically created.  We also don't invite
+# other instances of ourselves - that'd be weird!
+def local_whiteboard(body)
+  room = body.dup.sub('@', '')
+  return nil unless room.length >= 1
+  room_hash = MD5::digest(room)[0,8]
+  raise "Can't whiteboard main room" if room == 'chat' or
+                                        room_hash == EMPTY_ROOM
+
+  # Spawn our whiteboard window
+  @window.new_tab(room, WhiteboardPane)
+
+  # Connect to the room on the network
+  @connection.room_names[room_hash] = room
+  @connection.room_ids[room] = room_hash
+  _server_control('join', room_hash)
+  local_switch(room.dup)
+end
+
+
 # --------------------------------------------------------------------------
 # No more definitions beyond this point
 end

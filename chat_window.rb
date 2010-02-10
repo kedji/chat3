@@ -15,6 +15,7 @@ require 'rubygems' rescue nil
 require 'fox16'
 require 'fox16/colors'
 require 'room_pane.rb'
+require 'whiteboard_pane.rb'
 
 include Fox
 
@@ -167,16 +168,26 @@ class ChatWindow < FXMainWindow
     end
   end
 
-  # Adding a new tab and switcher element
-  def new_tab(name)
+  # Adding a new tab and switcher element.  Optionally you can specify a
+  # class (a pane type) which will be spawned.  RoomPane is spawned by default.
+  # Checks for duplicates automatically.
+  def new_tab(name, klass = RoomPane)
+    # Don't do anything if we already have this tab
+    @channels.each { |cname,_| return nil if cname == name }
+
+    # Add the visual indication of this tab
     @tab_names << FXTabItem.new(@tabs, name, nil)
     empty = FXPacker.new(@tabs)
     empty.padBottom = empty.padTop = empty.padLeft = empty.padRight = 0
     @empties << empty
-    new_channel = RoomPane.new(@switcher, @skin)
+
+    # Create the content of this channel - probably a RoomPane
+    new_channel = klass.new(@switcher, @skin)
     @channels << [ name, new_channel ]
     new_channel.create
-    new_channel.on_line(&@on_line_block)
+    new_channel.on_line(&@on_line_block)   # register our callback function
+
+    # Show the tabs (if so desired) now that we know we have more than one.
     (@tabs.create ; @tabs.show) if @skin[:show_tabs]
   end
 

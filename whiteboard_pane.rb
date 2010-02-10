@@ -63,6 +63,11 @@ class WhiteboardPane < FXPacker
       button.backColor = v
     end
 
+    # Exit button at the bottom all by itself
+    button_bye = FXButton.new(button_list, "Close", :opts => FRAME_RAISED |
+      FRAME_THICK | LAYOUT_FILL_X | LAYOUT_SIDE_BOTTOM)
+    button_bye.connect(SEL_COMMAND) { @on_line_block.call('/leave') }
+
     # Drawing area goes on the left
     cframe = FXHorizontalFrame.new(frames, :opts => LAYOUT_FILL | FRAME_SUNKEN |
       FRAME_THICK | LAYOUT_SIDE_LEFT, :padLeft => 0, :padRight => 0,

@@ -12,8 +12,6 @@ require 'client3.rb'
 $LOAD_PATH.push FILE_DIRECTORY
 require 'chat_window.rb'
 
-#require 'rsa.rb'
-
 # Ruby tool used to grab the source of included files, not just their content
 SCRIPT_LINES__ = {}
 
@@ -113,6 +111,8 @@ class KeyGenBox < FXDialogBox
 end
 
 
+# The top-level Chat 3.0 client class.  Methods in user3.rb and guser3.rb are
+# defined in the scope of this class.
 class Chat3
 
   def initialize
