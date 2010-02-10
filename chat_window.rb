@@ -65,7 +65,7 @@ class ChatWindow < FXMainWindow
     @switcher.padBottom = @switcher.padTop = 0
     @switcher.padLeft = @switcher.padRight = 0
     @channels = [ [ 'chat', RoomPane.new(@switcher, skin) ] ]
-    @channels.first.last.type_focus
+    @channels.first.last.type_focus rescue nil
 
     # Tabs are always off when there's only one room to display
     @tabs.hide
@@ -115,7 +115,7 @@ class ChatWindow < FXMainWindow
     tab_notify(indx, false)
     @switcher.current = indx
     @on_room_block.call(@channels[indx].first)
-    @channels[indx].last.type_focus
+    @channels[indx].last.type_focus rescue nil
   end
   
   # A user has clicked on a tab
@@ -240,7 +240,7 @@ class ChatWindow < FXMainWindow
     (@tabs.create ; @tabs.show) if @skin[:show_tabs] and indx != 0
     tab_notify(indx, false)
     @tabs.recalc
-    @channels[indx].last.type_focus
+    @channels[indx].last.type_focus rescue nil
   end
 
   # Return the number of visible (unhidden) tabs
