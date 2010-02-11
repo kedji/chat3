@@ -25,7 +25,7 @@ class RoomPane < FXPacker
   BACK_COLOR    = 0xffffffff
   CURSOR_COLOR  = 0xff333333
   FONT          =  'courier'
-  FONT_SIZE     =         10
+  FONT_SIZE     =          8
   SCROLLBARS    =      false
   PAD_HISTORY   =      false
   SPLITTER_SIZE =          1

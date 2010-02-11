@@ -177,8 +177,9 @@ class Chat3
 
   # We've received a chat message
   def remote_chat(sender, room, msg)
-    @window.room_append(room, "#{sender}: #{msg}")
-    add_msg "<#{room || 'unknown'}> #{sender}: #{msg}"
+    add_msg("#{sender}: #{msg}", room)
+    #@window.room_append(room, "#{sender}: #{msg}")
+    #add_msg "<#{room || 'unknown'}> #{sender}: #{msg}"
   end
 
   # We need to dispatch an event
@@ -194,7 +195,6 @@ class Chat3
 
   # Handle one line of local input
   def local_line(msg)
-    msg.strip!
     if msg[0,1] == '/'
       msg[0,1] = ''
       indx = ((msg =~ /\W/) || msg.length)
@@ -290,9 +290,9 @@ class Chat3
   # :notice means the notice buffer.
   def add_msg(msg, room)
     if room == :notice
-      ####  THIS SHOULD GO IN THE NOTICE BUFFER - ADD CODE HERE  ####
       room = :current
     end
+    dispatch(:display_line, msg, room)
     @window.room_append(room, msg)
   end
 
@@ -309,5 +309,3 @@ require 'guser3.rb'
 
 client = Chat3.new
 client.run
-
-
