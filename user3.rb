@@ -326,6 +326,19 @@ def local_keys(body)
 end
 
 
+# Remove the given user's key.  Only works if the user is not logged in.
+def local_remove(body)
+  key_hash = _user_keyhash(body)
+  raise "Invalid username" unless key_hash
+  raise "That user is signed in!" if @var[:presence][key_hash]
+  @connection.comm.rsa_keys.delete(body)
+  @connection.comm.names.delete(key_hash)
+  @var[:user_keys].delete body
+  _save_env
+  _notice "User '#{body}' has been removed from your key repository"
+end
+
+
 # Change the timestamp format - accepts string in strftime() format.  Spaces
 # are allowed.
 def local_timestamp(body)
