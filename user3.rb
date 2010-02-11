@@ -122,6 +122,7 @@ def _adjust_presence(op, peer_keyhash, room, msg, notify = true)
 
   # Find the prior and current presence state
   prior = (@var[:presence][peer_keyhash] || []).first
+  prior_msg = (@var[:presence][peer_keyhash] || []).last
   current = prior
   current = 'online' if op == 'online' or op == 'back'
   current = 'away' if op == 'away'
@@ -148,7 +149,7 @@ def _adjust_presence(op, peer_keyhash, room, msg, notify = true)
     elsif op == 'offline'
       _notice "#{peer_name} has disconnected#{msg}", :notice
       @var[:presence].delete peer_keyhash
-    elsif op == 'away' and prior != current
+    elsif op == 'away' and (prior != current or status != prior_msg)
       _notice "#{peer_name} is away#{msg}", :notice
     elsif op == 'back' or current == 'online' and prior != current
       _notice "#{peer_name} is back#{msg}", :notice
@@ -369,9 +370,19 @@ def local_grant(peer)
     _notice "You have re-granted access to revoked user #{peer}"
   end
   @var[:user_keys][peer] = key
+
+  # Set our status to "online" if need be
+  @var[:presence][@connection.comm.our_keyhash] ||= [ 'online', '' ]
+  status = 'online'
+  reason = @var[:presence][@connection.comm.our_keyhash].last.dup
+  if @var[:presence][@connection.comm.our_keyhash].first == 'away'
+    status = 'away'
+  end
+
+  # Construct the components we need to send in order
   content = [ AES3::iv_str(@connection.comm.keyring.default.iv),
               @connection.comm.keyring.default.key, @var[:our_name],
-              @var[:pub_rsa] ]
+              @var[:pub_rsa], status, reason ]
   _remote_control(peer, :grant, content.join(' '), true)
   _save_env
   unless @var[:granted].include? peer
@@ -598,18 +609,20 @@ end
 
 
 # A remote user has granted us their AES key!  Let's add it to our keyring.
-# Format: "grant" <aes_iv_str> <aes_key> <peer_name> <peer_rsa_key>
+# Format: "grant" <aes_iv_str> <aes_key> <peer_name> <peer_rsa_key> <status>
 def remote_grant(sender, body)
   key_id  = AES3::iv_from_str(_pop_token(body))
   aes_key = _pop_token(body)
   peer    = _pop_token(body)
   rsa_key = _pop_token(body)
+  status  = _pop_token(body).to_s
+  status  = 'online' if status.length < 3
   key_hash = MD5::digest(rsa_key)[0,8]
 
   # Remote user's data/presence
   fingerprint = _fingerprint(key_hash)
-  _adjust_presence('online', key_hash, EMPTY_ROOM, '', false)
-  _adjust_presence('join',   key_hash, EMPTY_ROOM, '', false)
+  _adjust_presence(status, key_hash, EMPTY_ROOM, body, false)
+  _adjust_presence('join',   key_hash, EMPTY_ROOM, body, false)
 
   # Are we getting an AES key from another instance of our account?
   if key_hash == @connection.comm.our_keyhash
@@ -769,14 +782,13 @@ end
 # Format: presence SPACE salutation
 def remote_pong(sender, body)
   presence = _pop_token(body)
-  salutation = _pop_token(body).to_s
   req = @var.delete :ping_request
   if req
     _notice("Ping reply from #{sender}: #{((Time.now - req) * 1000).to_i}ms",
             :notice)
   end
   if [ 'online', 'away' ].include?(presence)
-    _adjust_presence(presence, _user_keyhash(sender), salutation, body, true)
+    _adjust_presence(presence, _user_keyhash(sender), '', body, true)
   end
 end
 
