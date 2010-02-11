@@ -939,7 +939,7 @@ class RoomPane < FXPacker
   BACK_COLOR    = 0xffffffff
   CURSOR_COLOR  = 0xff333333
   FONT          =  'courier'
-  FONT_SIZE     =         10
+  FONT_SIZE     =          8
   SCROLLBARS    =      false
   PAD_HISTORY   =      false
   SPLITTER_SIZE =          1
@@ -1661,8 +1661,9 @@ class Chat3
 
   # We've received a chat message
   def remote_chat(sender, room, msg)
-    @window.room_append(room, "#{sender}: #{msg}")
-    add_msg "<#{room || 'unknown'}> #{sender}: #{msg}"
+    add_msg("#{sender}: #{msg}", room)
+    #@window.room_append(room, "#{sender}: #{msg}")
+    #add_msg "<#{room || 'unknown'}> #{sender}: #{msg}"
   end
 
   # We need to dispatch an event
@@ -1678,7 +1679,6 @@ class Chat3
 
   # Handle one line of local input
   def local_line(msg)
-    msg.strip!
     if msg[0,1] == '/'
       msg[0,1] = ''
       indx = ((msg =~ /\W/) || msg.length)
@@ -1774,9 +1774,9 @@ class Chat3
   # :notice means the notice buffer.
   def add_msg(msg, room)
     if room == :notice
-      ####  THIS SHOULD GO IN THE NOTICE BUFFER - ADD CODE HERE  ####
       room = :current
     end
+    dispatch(:display_line, msg, room)
     @window.room_append(room, msg)
   end
 
@@ -1829,6 +1829,25 @@ class Chat3
 
 # Put your definitions below this line:
 # --------------------------------------------------------------------------
+
+
+# This is the version number of the code.  The env3.yml also holds the version
+# number of the last code it ran.  This is how software upgrades are detected.
+# Version numbers can be compared with the _versioncmp() function.
+def _version
+  '3.0.1'
+end
+
+
+# Returns -1 if a < b, 0 if a == b, and 1 if a > b
+def _versioncmp(a, b)
+  a, b = a.to_s.split('.'), b.to_s.split('.')
+  [a.length, b.length].max.times do |i|
+    return -1 if a[i].to_i < b[i].to_i
+    return 1 if a[i].to_i > b[i].to_i
+  end
+  return 0
+end
 
 
 # Print a notice to the screen.  Types are :notice, :global, :crypto, :error.
@@ -2079,7 +2098,8 @@ end
 
 # Display a list of users you know and their key status.  No arguments.
 def local_keys(body)
-  _notice("Name:        RSA Fingerprint:      Status:")
+  disp = " -- Registered Accounts --\n"
+  disp << "Name:        RSA Fingerprint:      Status:\n"
   @var[:user_keys].each do |name,key|
     key_hash = MD5::digest(key)[0,8]
     fingerprint = _fingerprint(key_hash)
@@ -2091,8 +2111,18 @@ def local_keys(body)
     else
       status << "offline"
     end
-    _notice("#{(name+(' '*12))[0,12]} #{fingerprint}   #{status.join(', ')}")
+    disp << "#{(name+(' '*12))[0,12]} #{fingerprint}   #{status.join(', ')}\n"
   end
+  _notice(disp)
+end
+
+
+# Change the timestamp format - accepts string in strftime() format.  Spaces
+# are allowed.
+def local_timestamp(body)
+  @var[:timestamp] = body
+  _save_env
+  _notice "Timestamp format changed"
 end
 
 
@@ -2302,7 +2332,10 @@ def remote_name(sender, body)
     # Try to log in the user by their key first
     name = _user_name(key_hash)
     if name != 'unknown_user'
-      _notice "Trusted user #{name} has connected.", 'chat'
+      unless @var[:presence][key_hash]
+        @var[:presence][key_hash] = [ 'online', '' ]
+        _notice "Trusted user #{name} has connected.", 'chat'
+      end
       local_grant(name) unless @var[:revoked].include?(name)
       return nil
     end
@@ -2533,8 +2566,19 @@ def event_startup()
   @var[:auto_connect] = true        # We should connect on startup by default
   @var[:user_keys] = {}             # Maps usernames to full public keys
   @var[:last_ping] = Time.now       # Reset our ping counter
-  @var[:timestamp] = "(%H:%M)"      # Default chat timestamp
+  @var[:timestamp] = "(%H:%M) "     # Default chat timestamp
   _load_env                         # Load previous environment variables
+
+  # Upgrades!  Check to see if the version in env3.yml is less than the
+  # version of this file.
+  #####################################################################
+  if _versioncmp(@var[:version], '3.0.1') < 0
+    @var[:timestamp] = "(%H:%M) "   # fixed missing timestamp in 3.0.1
+  end
+  if @var[:version] != _version()
+    @var[:version] = _version()
+    _save_env
+  end
 
   # This is where we load the user's public and private key from the env.yml
   # configuration file.  If it's not there, we spawn a helpful creation tool.
@@ -2613,6 +2657,12 @@ end
 # Event gets raised when receiving a broadcast message.
 # msg.replace() changes the message, setting it to '' precludes delivery.
 def event_incoming_broadcast(peer, room, msg)
+end
+
+
+# Event gets raised when a line is about to get added to the screen.
+def event_display_line(msg, room)
+  msg.replace("#{Time.now.strftime(@var[:timestamp])}#{msg}") if msg
 end
 
 
@@ -2716,5 +2766,3 @@ end
 
 client = Chat3.new
 client.run
-
-
