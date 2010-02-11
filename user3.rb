@@ -207,13 +207,18 @@ end
 
 
 # Send a remote control to a provided user, optionally with RSA.  Set peer
-# to nil to deliver a remote control to the whole room.
+# to nil to deliver a remote control to the whole room.  If peer is set to nil
+# then the open AES key will be used, which means everyone will be able to
+# decrypt your message, including the server.  If "use_rsa" is set to true and
+# no user is specified, your default AES key will be used instead, which means
+# only users to whom you've granted access will be able to decrypt your message.
 def _remote_control(peer, command, body, use_rsa = false)
-  raise "Invalid user, #{peer}" if (peer or use_rsa) and not _user_keyhash(peer)
-  if use_rsa
+  raise "Invalid user, #{peer}" if peer and not _user_keyhash(peer)
+  if peer and use_rsa
     @connection.comm.send_private_command("#{command} #{body}", peer)
   else
     peer = _user_keyhash(peer) if peer
+    peer = true if not peer and use_rsa
     @connection.comm.send_command("#{command} #{body}", peer)
   end
 end
@@ -443,7 +448,7 @@ end
 def local_away(body)
   if body.length > 0
     @var[:away] = body
-    _remote_control(nil, 'pong', "away #{body}")
+    _remote_control(nil, 'pong', "away #{body}", true)
     #@var[:presence][@connection.comm.our_keyhash] = [ 'away', body ]
   else
     local_back('')
@@ -454,7 +459,7 @@ end
 # Declare that you are back, optionally specify a greeting.
 def local_back(body)
   return nil unless @var.delete(:away)
-  _remote_control(nil, 'pong', "online #{body}")
+  _remote_control(nil, 'pong', "online #{body}", true)
   #@var[:presence][@connection.comm.our_keyhash] = [ 'online', body ]
 end
 
@@ -764,13 +769,14 @@ end
 # Format: presence SPACE salutation
 def remote_pong(sender, body)
   presence = _pop_token(body)
+  salutation = _pop_token(body).to_s
   req = @var.delete :ping_request
   if req
     _notice("Ping reply from #{sender}: #{((Time.now - req) * 1000).to_i}ms",
             :notice)
   end
   if [ 'online', 'away' ].include?(presence)
-    _adjust_presence(presence, _user_keyhash(sender), '', body, true)
+    _adjust_presence(presence, _user_keyhash(sender), salutation, body, true)
   end
 end
 

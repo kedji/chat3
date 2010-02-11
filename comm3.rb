@@ -110,18 +110,33 @@ class CryptoComm
     @socket.print(msg)
   end
 
-  # Send a command out to a specific user, or to everyone
+  # Send a command out to a specific user, or to everyone.  If the message is
+  # to everyone, then default to using the open key.  However, setting rcpt
+  # to "true" will force the use of your default key.
   def send_command(msg, rcpt = nil)
+    allow_open_encrypt = true
+
+    # User has insisted that we not use the open key
+    if rcpt and rcpt.class != String
+      rcpt = nil
+      allow_open_encrypt = false
+    end
+
+    # Convert the user to their hash, or NULL if no user given
     rcpt = sender_keyhash(rcpt) if sender_keyhash(rcpt)
     rcpt ||= EMPTY_ROOM
+
+    # Choose which AES key/IV we'd like to use
     opaque, iv = nil, nil
-    if rcpt == EMPTY_ROOM
+    if rcpt == EMPTY_ROOM and allow_open_encrypt
       opaque = @keyring.open_encrypt(msg)
       iv = @keyring.open_key.iv
     else
       opaque = @keyring.encrypt(msg)
       iv = @keyring.default.iv
     end
+
+    # Encode our message and then deliver it.
     len = opaque.length + 8
     len = (len >> 24).chr + ((len >> 16) & 0xFF).chr +
           ((len >> 8) & 0xFF).chr + (len & 0xFF).chr

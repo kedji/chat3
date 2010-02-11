@@ -339,7 +339,7 @@ class ChatServer
 
       # This is a control - is it to everyone?
       elsif type == MSG_COMMAND
-        v.send(msg) if key_id == @keyring.open_key.iv || opaque[0,8] == v.name
+        v.send(msg) if opaque[0,8] == EMPTY_ROOM || opaque[0,8] == v.name
       
       # Only send to the specified user
       else
