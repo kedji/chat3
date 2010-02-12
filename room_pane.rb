@@ -18,19 +18,20 @@ require 'fox16/colors'
 include Fox
 
 class RoomPane < FXPacker
+
+  # These values are NOT respected when running chat.  They are only used
+  # when RoomPane is launched as a standalone app for testing.
   TYPE_HEIGHT   =         34    # Initial height (pixels) of the type-box
-  #TEXT_COLOR    = 0xff999999
-  #BACK_COLOR    = 0xff000000
   TEXT_COLOR    = 0xff000000
   BACK_COLOR    = 0xffffffff
   CURSOR_COLOR  = 0xff333333
-  FONT          =  'courier'
-  FONT_SIZE     =          8
-  SCROLLBARS    =      false
-  PAD_HISTORY   =      false
-  SPLITTER_SIZE =          1
+  FONT          = 'monospace'
+  FONT_SIZE     = 7
+  SCROLLBARS    = false
+  PAD_HISTORY   = false
+  SPLITTER_SIZE = 1
 
-  def initialize(parent, skin = {})
+  def initialize(parent, skin)
     super(parent, :opts => LAYOUT_FILL)
     @type_history = []      # history of things typed in this window
     @type_history_pos = 0   # our position while scrolling through the history

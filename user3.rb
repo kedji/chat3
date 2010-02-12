@@ -147,12 +147,12 @@ def _adjust_presence(op, peer_keyhash, room, msg, notify = true)
       _notice "#{peer_name} has #{op == 'join' ? 'joined' : 'left'}" +
               " room #{room}.", room
     elsif op == 'offline'
-      _notice "#{peer_name} has disconnected#{msg}", :notice
+      _notice "#{peer_name} has disconnected#{msg}", 'chat'
       @var[:presence].delete peer_keyhash
     elsif op == 'away' and (prior != current or status != prior_msg)
-      _notice "#{peer_name} is away#{msg}", :notice
+      _notice "#{peer_name} is away#{msg}", 'chat'
     elsif op == 'back' or current == 'online' and prior != current
-      _notice "#{peer_name} is back#{msg}", :notice
+      _notice "#{peer_name} is back#{msg}", 'chat'
     end
   end
   return [ peer_name, op, status, room ]
@@ -311,6 +311,21 @@ def local_nick(body)
 end
 
 
+# Invite the given user to the given room.  2 arguments
+def local_invite(body)
+  peer = _pop_token(body)
+  room = @var[:room] if body.length < 2
+  _remote_control(peer, :invite, room)
+  _notice "#{peer} has been invited to #{room}"
+end
+
+
+# Display the local version - no arguments
+def local_version(body)
+  _notice(_version)
+end
+
+
 # Display a list of users you know and their key status.  No arguments.
 def local_keys(body)
   disp = " -- Registered Accounts --\n"
@@ -368,6 +383,7 @@ def local_grant(peer)
   raise "invalid user: #{peer}" unless key
   if @var[:revoked].delete peer    # just in case
     _notice "You have re-granted access to revoked user #{peer}"
+    @var[:granted] << peer
   end
   @var[:user_keys][peer] = key
 
@@ -559,7 +575,7 @@ def remote_name(sender, body)
   fingerprint = _fingerprint(key_hash)
   if key_hash == @connection.comm.our_keyhash
     if @var[:logged_in]
-      _notice "Your account has connected from another location.", :notice
+      _notice "Your account has connected from another location.", 'chat'
       @var[:logged_in] += 1
       local_grant(_user_name(key_hash))
     else
@@ -572,9 +588,13 @@ def remote_name(sender, body)
     if name != 'unknown_user'
       unless @var[:presence][key_hash]
         @var[:presence][key_hash] = [ 'online', '' ]
-        _notice "Trusted user #{name} has connected.", 'chat'
+        if @var[:revoked].include?(name)
+          _notice "Revoked user #{name} has connected.", 'chat'
+        else
+          _notice "Trusted user #{name} has connected.", 'chat'
+          local_grant(name)
+        end
       end
-      local_grant(name) unless @var[:revoked].include?(name)
       return nil
     end
 
@@ -793,12 +813,10 @@ def remote_pong(sender, body)
 end
 
 
-# The chat client is starting up!
-def event_startup()
-  require 'md5'
-
-  # Generate a random AES session key first thing
-  @connection.comm.keyring.rekey!
+# This actuall gets called BEFORE startup.  The environment variables have
+# to be read before the GUI can be drawn, since the GUI depends on the
+# environment variables.
+def event_initialize_environment()
 
   # Set our defaults and then load our environment variables
   @var[:last_connection] = [ 'chat30.no-ip.org', 9000 ]
@@ -819,6 +837,16 @@ def event_startup()
     @var[:version] = _version()
     _save_env
   end
+end
+
+
+# The chat client is starting up!  At this point, the GUI is already displayed
+# and the environment variables are already loaded.
+def event_startup()
+  require 'md5'
+
+  # Generate a random AES session key first thing
+  @connection.comm.keyring.rekey!
 
   # This is where we load the user's public and private key from the env.yml
   # configuration file.  If it's not there, we spawn a helpful creation tool.

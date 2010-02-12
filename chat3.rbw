@@ -24,7 +24,7 @@ class WelcomeBox < FXDialogBox
   def initialize(parent)
     @username = ""
     # Window decoration options
-    super(parent, "Welcome to Chat 3.0", DECOR_TITLE | DECOR_BORDER |
+    super(parent, "Getting Started", DECOR_TITLE | DECOR_BORDER |
       LAYOUT_FIX_WIDTH | LAYOUT_FIX_HEIGHT)
     
     # Main dialog frame
@@ -97,9 +97,9 @@ class KeyGenBox < FXDialogBox
     FXLabel.new(self, "This takes about a minute")
 
     # Cancel button & handler
-    cancelButton = FXButton.new(self, "Cancel", nil, nil, 0, BUTTON_NORMAL |
+    cancel_button = FXButton.new(self, "Cancel", nil, nil, 0, BUTTON_NORMAL |
       LAYOUT_CENTER_X)
-    cancelButton.connect(SEL_COMMAND) do 
+    cancel_button.connect(SEL_COMMAND) do 
       Kernel.exit(0) # Allow users to quit
     end
 
@@ -119,10 +119,9 @@ class Chat3
     @cmds = []
     @controls = []
     @var = {}
-    @fox_app = FXApp.new
-    @window = ChatWindow.new(@fox_app)
-    @window.on_line { |txt| local_line(txt) }
-    @window.on_room_change { |room| @var[:room] = room }
+    load_command_methods()
+
+    # Create our single connection object and register its callback
     @connection = ChatConnection.new do |type, sender, room, msg|
       if type == MSG_BROADCAST
         dispatch :incoming_broadcast, sender, room, msg
@@ -132,7 +131,18 @@ class Chat3
       else
       end
     end
-    load_command_methods()
+
+    # Get our skin settings
+    dispatch(:initialize_environment)
+    @skin = @var[:skin]
+    (@var[:skin] = @skin = {}) unless @skin
+    DisplayPane::merge_defaults(@skin)
+
+    # Create our window
+    @fox_app = FXApp.new
+    @window = ChatWindow.new(@fox_app, @skin)
+    @window.on_line { |txt| local_line(txt) }
+    @window.on_room_change { |room| @var[:room] = room }
   end
 
   def connect(addr, port)

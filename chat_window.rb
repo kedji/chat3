@@ -16,12 +16,15 @@ require 'fox16'
 require 'fox16/colors'
 require 'room_pane.rb'
 require 'whiteboard_pane.rb'
+require 'display_pane.rb'
 
 include Fox
 
 class ChatWindow < FXMainWindow
   include Responder
-  
+
+  # These defaults are NOT respected when functioning as part of chat.  They
+  # only exist here for testing when run as a standalone script.  
   WINDOW_HEIGHT = 320
   WINDOW_WIDTH  = 480
   WINDOW_TITLE  = "Chat 3.0"
@@ -29,7 +32,7 @@ class ChatWindow < FXMainWindow
   ID_NEXT_TAB   = ID_LAST + 1
   ID_PREV_TAB   = ID_NEXT_TAB + 1
 
-  def initialize(app, skin = {})
+  def initialize(app, skin)
     @skin = skin
     @empties = []
     @waiting_tabs = {}
