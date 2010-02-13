@@ -16,32 +16,72 @@ require 'fox16'
 require 'fox16/colors'
 require 'room_pane.rb'
 require 'whiteboard_pane.rb'
-require 'display_pane.rb'
 
 include Fox
 
+
+# Helper font-selection dialog box
+class FontDialogBox < FXDialogBox
+  def initialize(parent, opts_array)
+    super(parent, "Choose a font", DECOR_TITLE | DECOR_BORDER)
+    @fs = FXFontSelector.new(self)
+    @fs.fontSelection.face = opts_array[0] if opts_array[0]
+    @fs.fontSelection.size = opts_array[1].to_i * 10 if opts_array[1]
+    @fs.acceptButton.connect(SEL_COMMAND) do
+      opts_array[0] = @fs.fontSelection.face.dup
+      opts_array[1] = @fs.fontSelection.size.to_i / 10
+      self.handle(self, MKUINT(FXDialogBox::ID_ACCEPT, SEL_COMMAND), nil)
+    end
+    @fs.cancelButton.connect(SEL_COMMAND) do
+      self.handle(self, MKUINT(FXDialogBox::ID_CANCEL, SEL_COMMAND), nil)
+    end
+  end
+end
+
+# Helper color-selection dialog box
+class ColorDialogBox < FXDialogBox
+  def initialize(parent, opts_array)
+    super(parent, "Choose a #{opts_array[0]} color", DECOR_TITLE | DECOR_BORDER)
+    @fs = FXColorSelector.new(self)
+    @fs.acceptButton.connect(SEL_COMMAND) do
+      opts_array[1] = @fs.rgba
+      self.handle(self, MKUINT(FXDialogBox::ID_ACCEPT, SEL_COMMAND), nil)
+    end
+    @fs.cancelButton.connect(SEL_COMMAND) do
+      self.handle(self, MKUINT(FXDialogBox::ID_CANCEL, SEL_COMMAND), nil)
+    end
+  end
+end
+
+
+#####   MAIN CHAT WINDOW CLASS - This is the top of the GUI   #####
 class ChatWindow < FXMainWindow
   include Responder
-
-  # These defaults are NOT respected when functioning as part of chat.  They
-  # only exist here for testing when run as a standalone script.  
-  WINDOW_HEIGHT = 320
-  WINDOW_WIDTH  = 480
-  WINDOW_TITLE  = "Chat 3.0"
-  SHOW_TABS     = true
   ID_NEXT_TAB   = ID_LAST + 1
   ID_PREV_TAB   = ID_NEXT_TAB + 1
+
+  # These are our default skin values
+  DEFAULTS = {
+    :window_height    => 320,
+    :window_width     => 480,
+    :show_tabs        => true,
+    :window_title     => 'Chat 3.0',
+    :font             => 'Monospace',
+    :font_size        => 7,
+    :back_color       => 0xffffffff,
+    :text_color       => 0xff000000,
+    :cursor_color     => 0xff333333,
+    :scrollbars       => false,
+    :pad_history      => false,
+    :splitter_size    => 1,
+    :type_height      => 34,
+  }
 
   def initialize(app, skin)
     @skin = skin
     @empties = []
     @waiting_tabs = {}
-
-    # Set up some default appearance values first
-    @skin[:window_height]    ||=  WINDOW_HEIGHT
-    @skin[:window_width]     ||=  WINDOW_WIDTH
-    @skin[:window_title]     ||=  WINDOW_TITLE
-    @skin[:show_tabs]        ||=  SHOW_TABS
+    merge_defaults(@skin)
 
     # Create the main window
     super(app, @skin[:window_title], :width => @skin[:window_width],
@@ -98,6 +138,14 @@ class ChatWindow < FXMainWindow
   def create
     super
     show(PLACEMENT_SCREEN)
+  end
+
+  # Make sure all the skin options are set.  Any absent items will get
+  # set to their default values.
+  def merge_defaults(skin)
+    DEFAULTS.each do |k,v|
+      skin[k] = v if skin[k].nil?
+    end
   end
 
   # Turn activity notification on or off for the given tab index
@@ -251,6 +299,15 @@ class ChatWindow < FXMainWindow
     count = 0
     @tab_names.each { |x| count += 1 if x.visible? }
     count
+  end
+
+  # Apply the new skin (or the old one) to all the panes that'll take it.
+  def apply_skin(skin = nil)
+    skin ||= @skin
+    @skin = skin
+    @channels.each do |_,pane|
+      pane.apply_skin(@skin) rescue nil
+    end
   end
 
 end  # of class ChatWindow

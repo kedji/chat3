@@ -86,6 +86,33 @@ def local_whiteboard(body)
 end
 
 
+# Select which font/size we'd like to use, no arguments
+def local_font(body)
+  opts_array = [ @var[:skin][:font].dup, @var[:skin][:font_size] ]
+  chooser = FontDialogBox.new(@fox_app, opts_array)
+  chooser.create
+  if chooser.execute(PLACEMENT_OWNER) == 1
+    @var[:skin][:font]      = opts_array[0]
+    @var[:skin][:font_size] = opts_array[1]
+    @window.apply_skin(@skin)
+    _save_env
+  end
+end
+
+
+# Select which background color we'd like
+def local_bg(body)
+  opts_array = [ "background", @var[:skin][:back_color].to_i ]
+  chooser = ColorDialogBox.new(@fox_app, opts_array)
+  chooser.create
+  if chooser.execute(PLACEMENT_OWNER) == 1
+    @var[:skin][:back_color] = opts_array[1]
+    @window.apply_skin(@skin)
+    _save_env
+  end
+end
+
+
 # --------------------------------------------------------------------------
 # No more definitions beyond this point
 end

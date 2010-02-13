@@ -720,7 +720,7 @@ def remote_motd(sender, body)
   room = @connection.room_names[body[0,8]]
   username = _user_name(body[8,8])
   body[0,16] = ''
-  _notice "-- #{body} (#{username}) --", room
+  _notice "-- MOTD (#{username}) --\n#{body}", room
 end
 
 
@@ -737,8 +737,8 @@ def remote_names(sender, body)
 
   # Print the names if explicitly requested
   if @var.delete(:names_requested)
-    _notice("#{room}: #{key_hashes.collect { |x| _user_name(x) }.join('  ')}",
-            room)
+    _notice("-- Users on #{room}: --\n" + 
+            "#{key_hashes.collect { |x| _user_name(x) }.join('  ')}", room)
   end
   
   # Quietly update presence state

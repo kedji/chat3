@@ -136,7 +136,6 @@ class Chat3
     dispatch(:initialize_environment)
     @skin = @var[:skin]
     (@var[:skin] = @skin = {}) unless @skin
-    DisplayPane::merge_defaults(@skin)
 
     # Create our window
     @fox_app = FXApp.new
