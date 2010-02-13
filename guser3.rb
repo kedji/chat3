@@ -43,8 +43,9 @@ end
 # When the user switches rooms, we need to select that tab in the GUI
 alias _guser_local_switch local_switch
 def local_switch(body)
-  _guser_local_switch(body, true)
-  @window.room_change(body)
+  if _guser_local_switch(body, true)
+    @window.room_change(body)
+  end
 end
 
 
@@ -69,7 +70,8 @@ end
 # and a WhiteboardPand tab is automatically created.  We also don't invite
 # other instances of ourselves - that'd be weird!
 def local_whiteboard(body)
-  room = body.dup.sub('@', '')
+  room = body.dup
+  room[0,1] = '' until room[0,1] != '@'
   return nil unless room.length >= 1
   room_hash = MD5::digest(room)[0,8]
   raise "Can't whiteboard main room" if room == 'chat' or
@@ -77,6 +79,7 @@ def local_whiteboard(body)
 
   # Spawn our whiteboard window
   @window.new_tab(room, WhiteboardPane)
+  @var[:special_rooms][room] = false
 
   # Connect to the room on the network
   @connection.room_names[room_hash] = room

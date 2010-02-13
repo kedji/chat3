@@ -83,8 +83,18 @@ end
 
 # We're resetting all of our network state for a reconnection
 def _network_init
+  # A note on special_rooms.  Special rooms are "rooms" that may or may not
+  # be tied to an actual chatroom, and even if they are, it may be inappropriate
+  # to log their contents.  Whiteboard rooms, for instance, are connected to
+  # an actual chatroom, but logging the rooms' contents would be absurd.
+  # Private message "rooms" aren't actual chatrooms, but logging is probably a
+  # good idea.  The special room hash persists across network restarts but is
+  # not saved to disk.  Any value evaluating to true means "log".
+  special_rooms = @var.delete :special_rooms
+
   # Flush out all blacklisted state
   @var[:blacklist_env].each { |rm| @var.delete rm unless rm == :blacklist_env }
+  @var[:special_rooms] = special_rooms
 
   # Add the key hashes
   @var[:user_keys].each do |name, key|
@@ -377,6 +387,18 @@ def local_disconnect(body)
 end
 
 
+# Display a list of the environment variables, no arguments.
+def local_env(body)
+  env = ''
+  vtmp = @var.dup
+  vtmp[:pub_rsa] = '[PUBLIC RSA KEY]'
+  vtmp[:prv_rsa] = '[PRIVATE RSA KEY]'
+  vtmp[:user_keys] = @var[:user_keys].collect { |k,_| k }
+  vtmp.each { |k,v| env << "#{(k.to_s + ' '*20)[0,20]} => #{v.inspect}\n" }
+  _notice " -- Current Environment Variables --\n#{env}"
+end
+
+
 # Grant your session key to the provided user - 1 argument.
 def local_grant(peer)
   key = @connection.comm.rsa_keys[peer]
@@ -506,14 +528,17 @@ end
 
 # Join a chat room - one argument.
 def local_join(body)
-  room = body.dup.sub('@', '')
+  room = body.dup
+  room[0,1] = '' until room[0,1] != '@'
   return nil unless room.length >= 1
-  room_hash = MD5::digest(room)[0,8]
-  room_hash = EMPTY_ROOM if room == 'chat'
-  @connection.room_names[room_hash] = room
-  @connection.room_ids[room] = room_hash
-  _remote_control(@var[:our_name], :invite, body, true)
-  _server_control('join', room_hash)
+  unless @var[:special_rooms].include?(room)
+    room_hash = MD5::digest(room)[0,8]
+    room_hash = EMPTY_ROOM if room == 'chat'
+    @connection.room_names[room_hash] = room
+    @connection.room_ids[room] = room_hash
+    _remote_control(@var[:our_name], :invite, body, true)
+    _server_control('join', room_hash)
+  end
   local_switch(room.dup)
 end
 
@@ -535,13 +560,14 @@ end
 
 # Switch to speaking in the given chatroom.  If no room is given, the main
 # room will be selected.  Private messaging can be accomplished by prepending
-# a '@' character to the user's name.
+# a '@' character to the user's name.  Return true on success, false otherwise.
 def local_switch(body, prevent = false)
   room = body
   room = 'chat' if room.length < 1
-  unless @connection.room_ids[room] or room == 'chat' or room[0,1] == '@'
+  unless @connection.room_ids[room] or room == 'chat' or room[0,1] == '@' or
+         @var[:special_rooms].include?(room)
     _notice "You are not in room '#{room}'", :error
-    return nil
+    return false
   end
   @var[:room] = room
   unless prevent
@@ -551,6 +577,7 @@ def local_switch(body, prevent = false)
       _notice "You are now chatting in '#{room}'", room
     end
   end
+  true
 end
 
 
@@ -825,7 +852,25 @@ def event_initialize_environment()
   @var[:user_keys] = {}             # Maps usernames to full public keys
   @var[:last_ping] = Time.now       # Reset our ping counter
   @var[:timestamp] = "(%H:%M) "     # Default chat timestamp
+  @var[:special_rooms] = {}         # Don't save these, may not be actual rooms
   _load_env                         # Load previous environment variables
+
+  # Initialize a blacklist of environment variables we don't want saved
+  @var[:blacklist_env] = Array.new
+  @var[:blacklist_env].push :blacklist_env
+  @var[:blacklist_env].push :script_lines
+  @var[:blacklist_env].push :file_open_raised
+  @var[:blacklist_env].push :last_private_peer
+  @var[:blacklist_env].push :private_user
+  @var[:blacklist_env].push :granted
+  @var[:blacklist_env].push :granted_by
+  @var[:blacklist_env].push :room
+  @var[:blacklist_env].push :special_rooms
+  @var[:blacklist_env].push :away
+  @var[:blacklist_env].push :logged_in
+  @var[:blacklist_env].push :membership
+  @var[:blacklist_env].push :presence
+  @var[:blacklist_env].push :ping_request
 
   # Upgrades!  Check to see if the version in env3.yml is less than the
   # version of this file.
@@ -863,22 +908,6 @@ def event_startup()
   end
   @connection.comm.initialize_address_book(@var[:pub_rsa], @var[:prv_rsa],
                                            @var[:our_name])
-
-  # Initialize a blacklist of environment variables we don't want saved
-  @var[:blacklist_env] = Array.new
-  @var[:blacklist_env].push :blacklist_env
-  @var[:blacklist_env].push :script_lines
-  @var[:blacklist_env].push :file_open_raised
-  @var[:blacklist_env].push :last_private_peer
-  @var[:blacklist_env].push :private_user
-  @var[:blacklist_env].push :granted
-  @var[:blacklist_env].push :granted_by
-  @var[:blacklist_env].push :room
-  @var[:blacklist_env].push :away
-  @var[:blacklist_env].push :logged_in
-  @var[:blacklist_env].push :membership
-  @var[:blacklist_env].push :presence
-  @var[:blacklist_env].push :ping_request
 
   _network_init
 
