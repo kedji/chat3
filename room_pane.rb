@@ -56,6 +56,9 @@ class RoomPane < FXPacker
     # Register callbacks
     @type.connect(SEL_KEYPRESS, method(:on_keypress))
     @history.connect(SEL_FOCUSIN) { @type.setFocus() }
+    @history.connect(SEL_RIGHTBUTTONPRESS) {
+      @history.handle(@history, MKUINT(FXText::ID_COPY_SEL, SEL_COMMAND), nil)
+    }
   end
 
   # Apply the appearance variables contained in our 'skin' hash, accepting
