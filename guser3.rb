@@ -89,17 +89,34 @@ def local_whiteboard(body)
 end
 
 
-# Select which font/size we'd like to use, no arguments
+# Select which font/size we'd like to use.  Running with no arguments spawns a
+# selection dialog.  Supply one argument to specify a font name directly, or
+# two arguments to specify a font and a size.
 def local_font(body)
   opts_array = [ @var[:skin][:font].dup, @var[:skin][:font_size] ]
-  chooser = FontDialogBox.new(@fox_app, opts_array)
-  chooser.create
-  if chooser.execute(PLACEMENT_OWNER) == 1
-    @var[:skin][:font]      = opts_array[0]
-    @var[:skin][:font_size] = opts_array[1]
-    @window.apply_skin(@skin)
-    _save_env
+  params = body.split
+
+  # Should we spawn a dialog?
+  if params.empty?
+    chooser = FontDialogBox.new(@fox_app, opts_array)
+    chooser.create
+    if chooser.execute(PLACEMENT_OWNER) != 1
+      return nil
+    end
+
+  # Some manual options were specified
+  else
+    opts_array[0] = params.first.dup
+    size = params[1].to_i
+    opts_array[1] = size if size >= 5
   end
+
+  # Font options are now in opts_array
+  @var[:skin][:font]      = opts_array[0]
+  @var[:skin][:font_size] = opts_array[1]
+  @window.apply_skin(@skin)
+  _save_env
+  true    
 end
 
 

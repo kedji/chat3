@@ -82,6 +82,7 @@ class RoomPane < FXPacker
     @type_height = @skin[:type_height]
     @history.height = @history.height + @type.height - @type_height
     font = FXFont.new(app, @skin[:font], @skin[:font_size])
+    font.create
     @type.font = @history.font = font
     if @skin[:scrollbars]
       @type.scrollStyle &= ~VSCROLLER_NEVER
