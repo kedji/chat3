@@ -669,18 +669,33 @@ class CryptoComm
     @socket.print(msg)
   end
 
-  # Send a command out to a specific user, or to everyone
+  # Send a command out to a specific user, or to everyone.  If the message is
+  # to everyone, then default to using the open key.  However, setting rcpt
+  # to "true" will force the use of your default key.
   def send_command(msg, rcpt = nil)
+    allow_open_encrypt = true
+
+    # User has insisted that we not use the open key
+    if rcpt and rcpt.class != String
+      rcpt = nil
+      allow_open_encrypt = false
+    end
+
+    # Convert the user to their hash, or NULL if no user given
     rcpt = sender_keyhash(rcpt) if sender_keyhash(rcpt)
     rcpt ||= EMPTY_ROOM
+
+    # Choose which AES key/IV we'd like to use
     opaque, iv = nil, nil
-    if rcpt == EMPTY_ROOM
+    if rcpt == EMPTY_ROOM and allow_open_encrypt
       opaque = @keyring.open_encrypt(msg)
       iv = @keyring.open_key.iv
     else
       opaque = @keyring.encrypt(msg)
       iv = @keyring.default.iv
     end
+
+    # Encode our message and then deliver it.
     len = opaque.length + 8
     len = (len >> 24).chr + ((len >> 16) & 0xFF).chr +
           ((len >> 8) & 0xFF).chr + (len & 0xFF).chr
@@ -932,19 +947,20 @@ require 'fox16/colors'
 include Fox
 
 class RoomPane < FXPacker
+
+  # These values are NOT respected when running chat.  They are only used
+  # when RoomPane is launched as a standalone app for testing.
   TYPE_HEIGHT   =         34    # Initial height (pixels) of the type-box
-  #TEXT_COLOR    = 0xff999999
-  #BACK_COLOR    = 0xff000000
   TEXT_COLOR    = 0xff000000
   BACK_COLOR    = 0xffffffff
   CURSOR_COLOR  = 0xff333333
-  FONT          =  'courier'
-  FONT_SIZE     =          8
-  SCROLLBARS    =      false
-  PAD_HISTORY   =      false
-  SPLITTER_SIZE =          1
+  FONT          = 'monospace'
+  FONT_SIZE     = 7
+  SCROLLBARS    = false
+  PAD_HISTORY   = false
+  SPLITTER_SIZE = 1
 
-  def initialize(parent, skin = {})
+  def initialize(parent, skin)
     super(parent, :opts => LAYOUT_FILL)
     @type_history = []      # history of things typed in this window
     @type_history_pos = 0   # our position while scrolling through the history
@@ -969,6 +985,9 @@ class RoomPane < FXPacker
     # Register callbacks
     @type.connect(SEL_KEYPRESS, method(:on_keypress))
     @history.connect(SEL_FOCUSIN) { @type.setFocus() }
+    @history.connect(SEL_RIGHTBUTTONPRESS) {
+      @history.handle(@history, MKUINT(FXText::ID_COPY_SEL, SEL_COMMAND), nil)
+    }
   end
 
   # Apply the appearance variables contained in our 'skin' hash, accepting
@@ -995,6 +1014,7 @@ class RoomPane < FXPacker
     @type_height = @skin[:type_height]
     @history.height = @history.height + @type.height - @type_height
     font = FXFont.new(app, @skin[:font], @skin[:font_size])
+    font.create
     @type.font = @history.font = font
     if @skin[:scrollbars]
       @type.scrollStyle &= ~VSCROLLER_NEVER
@@ -1261,26 +1281,69 @@ end  # of class WhiteboardPane
 
 include Fox
 
+
+# Helper font-selection dialog box
+class FontDialogBox < FXDialogBox
+  def initialize(parent, opts_array)
+    super(parent, "Choose a font", DECOR_TITLE | DECOR_BORDER)
+    @fs = FXFontSelector.new(self)
+    @fs.fontSelection.face = opts_array[0] if opts_array[0]
+    @fs.fontSelection.size = opts_array[1].to_i * 10 if opts_array[1]
+    @fs.acceptButton.connect(SEL_COMMAND) do
+      opts_array[0] = @fs.fontSelection.face.dup
+      opts_array[1] = @fs.fontSelection.size.to_i / 10
+      self.handle(self, MKUINT(FXDialogBox::ID_ACCEPT, SEL_COMMAND), nil)
+    end
+    @fs.cancelButton.connect(SEL_COMMAND) do
+      self.handle(self, MKUINT(FXDialogBox::ID_CANCEL, SEL_COMMAND), nil)
+    end
+  end
+end
+
+# Helper color-selection dialog box
+class ColorDialogBox < FXDialogBox
+  def initialize(parent, opts_array)
+    super(parent, "Choose a #{opts_array[0]} color", DECOR_TITLE | DECOR_BORDER)
+    @fs = FXColorSelector.new(self)
+    @fs.acceptButton.connect(SEL_COMMAND) do
+      opts_array[1] = @fs.rgba
+      self.handle(self, MKUINT(FXDialogBox::ID_ACCEPT, SEL_COMMAND), nil)
+    end
+    @fs.cancelButton.connect(SEL_COMMAND) do
+      self.handle(self, MKUINT(FXDialogBox::ID_CANCEL, SEL_COMMAND), nil)
+    end
+  end
+end
+
+
+#####   MAIN CHAT WINDOW CLASS - This is the top of the GUI   #####
 class ChatWindow < FXMainWindow
   include Responder
-  
-  WINDOW_HEIGHT = 320
-  WINDOW_WIDTH  = 480
-  WINDOW_TITLE  = "Chat 3.0"
-  SHOW_TABS     = true
   ID_NEXT_TAB   = ID_LAST + 1
   ID_PREV_TAB   = ID_NEXT_TAB + 1
 
-  def initialize(app, skin = {})
+  # These are our default skin values
+  DEFAULTS = {
+    :window_height    => 320,
+    :window_width     => 480,
+    :show_tabs        => true,
+    :window_title     => 'Chat 3.0',
+    :font             => 'Monospace',
+    :font_size        => 7,
+    :back_color       => 0xffffffff,
+    :text_color       => 0xff000000,
+    :cursor_color     => 0xff333333,
+    :scrollbars       => false,
+    :pad_history      => false,
+    :splitter_size    => 1,
+    :type_height      => 34,
+  }
+
+  def initialize(app, skin)
     @skin = skin
     @empties = []
     @waiting_tabs = {}
-
-    # Set up some default appearance values first
-    @skin[:window_height]    ||=  WINDOW_HEIGHT
-    @skin[:window_width]     ||=  WINDOW_WIDTH
-    @skin[:window_title]     ||=  WINDOW_TITLE
-    @skin[:show_tabs]        ||=  SHOW_TABS
+    merge_defaults(@skin)
 
     # Create the main window
     super(app, @skin[:window_title], :width => @skin[:window_width],
@@ -1337,6 +1400,14 @@ class ChatWindow < FXMainWindow
   def create
     super
     show(PLACEMENT_SCREEN)
+  end
+
+  # Make sure all the skin options are set.  Any absent items will get
+  # set to their default values.
+  def merge_defaults(skin)
+    DEFAULTS.each do |k,v|
+      skin[k] = v if skin[k].nil?
+    end
   end
 
   # Turn activity notification on or off for the given tab index
@@ -1492,6 +1563,15 @@ class ChatWindow < FXMainWindow
     count
   end
 
+  # Apply the new skin (or the old one) to all the panes that'll take it.
+  def apply_skin(skin = nil)
+    skin ||= @skin
+    @skin = skin
+    @channels.each do |_,pane|
+      pane.apply_skin(@skin) rescue nil
+    end
+  end
+
 end  # of class ChatWindow
 
 #### End of aggregated 'chat_window.rb' ####
@@ -1508,7 +1588,7 @@ class WelcomeBox < FXDialogBox
   def initialize(parent)
     @username = ""
     # Window decoration options
-    super(parent, "Welcome to Chat 3.0", DECOR_TITLE | DECOR_BORDER |
+    super(parent, "Getting Started", DECOR_TITLE | DECOR_BORDER |
       LAYOUT_FIX_WIDTH | LAYOUT_FIX_HEIGHT)
     
     # Main dialog frame
@@ -1581,9 +1661,9 @@ class KeyGenBox < FXDialogBox
     FXLabel.new(self, "This takes about a minute")
 
     # Cancel button & handler
-    cancelButton = FXButton.new(self, "Cancel", nil, nil, 0, BUTTON_NORMAL |
+    cancel_button = FXButton.new(self, "Cancel", nil, nil, 0, BUTTON_NORMAL |
       LAYOUT_CENTER_X)
-    cancelButton.connect(SEL_COMMAND) do 
+    cancel_button.connect(SEL_COMMAND) do 
       Kernel.exit(0) # Allow users to quit
     end
 
@@ -1603,10 +1683,9 @@ class Chat3
     @cmds = []
     @controls = []
     @var = {}
-    @fox_app = FXApp.new
-    @window = ChatWindow.new(@fox_app)
-    @window.on_line { |txt| local_line(txt) }
-    @window.on_room_change { |room| @var[:room] = room }
+    load_command_methods()
+
+    # Create our single connection object and register its callback
     @connection = ChatConnection.new do |type, sender, room, msg|
       if type == MSG_BROADCAST
         dispatch :incoming_broadcast, sender, room, msg
@@ -1616,7 +1695,17 @@ class Chat3
       else
       end
     end
-    load_command_methods()
+
+    # Get our skin settings
+    dispatch(:initialize_environment)
+    @skin = @var[:skin]
+    (@var[:skin] = @skin = {}) unless @skin
+
+    # Create our window
+    @fox_app = FXApp.new
+    @window = ChatWindow.new(@fox_app, @skin)
+    @window.on_line { |txt| local_line(txt) }
+    @window.on_room_change { |room| @var[:room] = room }
   end
 
   def connect(addr, port)
@@ -1874,8 +1963,18 @@ end
 
 # We're resetting all of our network state for a reconnection
 def _network_init
+  # A note on special_rooms.  Special rooms are "rooms" that may or may not
+  # be tied to an actual chatroom, and even if they are, it may be inappropriate
+  # to log their contents.  Whiteboard rooms, for instance, are connected to
+  # an actual chatroom, but logging the rooms' contents would be absurd.
+  # Private message "rooms" aren't actual chatrooms, but logging is probably a
+  # good idea.  The special room hash persists across network restarts but is
+  # not saved to disk.  Any value evaluating to true means "log".
+  special_rooms = @var.delete :special_rooms
+
   # Flush out all blacklisted state
   @var[:blacklist_env].each { |rm| @var.delete rm unless rm == :blacklist_env }
+  @var[:special_rooms] = special_rooms
 
   # Add the key hashes
   @var[:user_keys].each do |name, key|
@@ -1913,6 +2012,7 @@ def _adjust_presence(op, peer_keyhash, room, msg, notify = true)
 
   # Find the prior and current presence state
   prior = (@var[:presence][peer_keyhash] || []).first
+  prior_msg = (@var[:presence][peer_keyhash] || []).last
   current = prior
   current = 'online' if op == 'online' or op == 'back'
   current = 'away' if op == 'away'
@@ -1937,12 +2037,12 @@ def _adjust_presence(op, peer_keyhash, room, msg, notify = true)
       _notice "#{peer_name} has #{op == 'join' ? 'joined' : 'left'}" +
               " room #{room}.", room
     elsif op == 'offline'
-      _notice "#{peer_name} has disconnected#{msg}", :notice
+      _notice "#{peer_name} has disconnected#{msg}", 'chat'
       @var[:presence].delete peer_keyhash
-    elsif op == 'away' and prior != current
-      _notice "#{peer_name} is away#{msg}", :notice
+    elsif op == 'away' and (prior != current or status != prior_msg)
+      _notice "#{peer_name} is away#{msg}", 'chat'
     elsif op == 'back' or current == 'online' and prior != current
-      _notice "#{peer_name} is back#{msg}", :notice
+      _notice "#{peer_name} is back#{msg}", 'chat'
     end
   end
   return [ peer_name, op, status, room ]
@@ -1998,13 +2098,18 @@ end
 
 
 # Send a remote control to a provided user, optionally with RSA.  Set peer
-# to nil to deliver a remote control to the whole room.
+# to nil to deliver a remote control to the whole room.  If peer is set to nil
+# then the open AES key will be used, which means everyone will be able to
+# decrypt your message, including the server.  If "use_rsa" is set to true and
+# no user is specified, your default AES key will be used instead, which means
+# only users to whom you've granted access will be able to decrypt your message.
 def _remote_control(peer, command, body, use_rsa = false)
-  raise "Invalid user, #{peer}" if (peer or use_rsa) and not _user_keyhash(peer)
-  if use_rsa
+  raise "Invalid user, #{peer}" if peer and not _user_keyhash(peer)
+  if peer and use_rsa
     @connection.comm.send_private_command("#{command} #{body}", peer)
   else
     peer = _user_keyhash(peer) if peer
+    peer = true if not peer and use_rsa
     @connection.comm.send_command("#{command} #{body}", peer)
   end
 end
@@ -2096,6 +2201,21 @@ def local_nick(body)
 end
 
 
+# Invite the given user to the given room.  2 arguments
+def local_invite(body)
+  peer = _pop_token(body)
+  room = @var[:room] if body.length < 2
+  _remote_control(peer, :invite, room)
+  _notice "#{peer} has been invited to #{room}"
+end
+
+
+# Display the local version - no arguments
+def local_version(body)
+  _notice(_version)
+end
+
+
 # Display a list of users you know and their key status.  No arguments.
 def local_keys(body)
   disp = " -- Registered Accounts --\n"
@@ -2117,6 +2237,19 @@ def local_keys(body)
 end
 
 
+# Remove the given user's key.  Only works if the user is not logged in.
+def local_remove(body)
+  key_hash = _user_keyhash(body)
+  raise "Invalid username" unless key_hash
+  raise "That user is signed in!" if @var[:presence][key_hash]
+  @connection.comm.rsa_keys.delete(body)
+  @connection.comm.names.delete(key_hash)
+  @var[:user_keys].delete body
+  _save_env
+  _notice "User '#{body}' has been removed from your key repository"
+end
+
+
 # Change the timestamp format - accepts string in strftime() format.  Spaces
 # are allowed.
 def local_timestamp(body)
@@ -2134,17 +2267,40 @@ def local_disconnect(body)
 end
 
 
+# Display a list of the environment variables, no arguments.
+def local_env(body)
+  env = ''
+  vtmp = @var.dup
+  vtmp[:pub_rsa] = '[PUBLIC RSA KEY]'
+  vtmp[:prv_rsa] = '[PRIVATE RSA KEY]'
+  vtmp[:user_keys] = @var[:user_keys].collect { |k,_| k }
+  vtmp.each { |k,v| env << "#{(k.to_s + ' '*20)[0,20]} => #{v.inspect}\n" }
+  _notice " -- Current Environment Variables --\n#{env}"
+end
+
+
 # Grant your session key to the provided user - 1 argument.
 def local_grant(peer)
   key = @connection.comm.rsa_keys[peer]
   raise "invalid user: #{peer}" unless key
   if @var[:revoked].delete peer    # just in case
     _notice "You have re-granted access to revoked user #{peer}"
+    @var[:granted] << peer
   end
   @var[:user_keys][peer] = key
+
+  # Set our status to "online" if need be
+  @var[:presence][@connection.comm.our_keyhash] ||= [ 'online', '' ]
+  status = 'online'
+  reason = @var[:presence][@connection.comm.our_keyhash].last.dup
+  if @var[:presence][@connection.comm.our_keyhash].first == 'away'
+    status = 'away'
+  end
+
+  # Construct the components we need to send in order
   content = [ AES3::iv_str(@connection.comm.keyring.default.iv),
               @connection.comm.keyring.default.key, @var[:our_name],
-              @var[:pub_rsa] ]
+              @var[:pub_rsa], status, reason ]
   _remote_control(peer, :grant, content.join(' '), true)
   _save_env
   unless @var[:granted].include? peer
@@ -2221,7 +2377,7 @@ end
 def local_away(body)
   if body.length > 0
     @var[:away] = body
-    _remote_control(nil, 'pong', "away #{body}")
+    _remote_control(nil, 'pong', "away #{body}", true)
     #@var[:presence][@connection.comm.our_keyhash] = [ 'away', body ]
   else
     local_back('')
@@ -2232,7 +2388,7 @@ end
 # Declare that you are back, optionally specify a greeting.
 def local_back(body)
   return nil unless @var.delete(:away)
-  _remote_control(nil, 'pong', "online #{body}")
+  _remote_control(nil, 'pong', "online #{body}", true)
   #@var[:presence][@connection.comm.our_keyhash] = [ 'online', body ]
 end
 
@@ -2252,14 +2408,17 @@ end
 
 # Join a chat room - one argument.
 def local_join(body)
-  room = body.dup.sub('@', '')
+  room = body.dup
+  room[0,1] = '' until room[0,1] != '@'
   return nil unless room.length >= 1
-  room_hash = MD5::digest(room)[0,8]
-  room_hash = EMPTY_ROOM if room == 'chat'
-  @connection.room_names[room_hash] = room
-  @connection.room_ids[room] = room_hash
-  _remote_control(@var[:our_name], :invite, body, true)
-  _server_control('join', room_hash)
+  unless @var[:special_rooms].include?(room)
+    room_hash = MD5::digest(room)[0,8]
+    room_hash = EMPTY_ROOM if room == 'chat'
+    @connection.room_names[room_hash] = room
+    @connection.room_ids[room] = room_hash
+    _remote_control(@var[:our_name], :invite, body, true)
+    _server_control('join', room_hash)
+  end
   local_switch(room.dup)
 end
 
@@ -2281,13 +2440,14 @@ end
 
 # Switch to speaking in the given chatroom.  If no room is given, the main
 # room will be selected.  Private messaging can be accomplished by prepending
-# a '@' character to the user's name.
+# a '@' character to the user's name.  Return true on success, false otherwise.
 def local_switch(body, prevent = false)
   room = body
   room = 'chat' if room.length < 1
-  unless @connection.room_ids[room] or room == 'chat' or room[0,1] == '@'
+  unless @connection.room_ids[room] or room == 'chat' or room[0,1] == '@' or
+         @var[:special_rooms].include?(room)
     _notice "You are not in room '#{room}'", :error
-    return nil
+    return false
   end
   @var[:room] = room
   unless prevent
@@ -2297,6 +2457,7 @@ def local_switch(body, prevent = false)
       _notice "You are now chatting in '#{room}'", room
     end
   end
+  true
 end
 
 
@@ -2321,7 +2482,7 @@ def remote_name(sender, body)
   fingerprint = _fingerprint(key_hash)
   if key_hash == @connection.comm.our_keyhash
     if @var[:logged_in]
-      _notice "Your account has connected from another location.", :notice
+      _notice "Your account has connected from another location.", 'chat'
       @var[:logged_in] += 1
       local_grant(_user_name(key_hash))
     else
@@ -2334,9 +2495,13 @@ def remote_name(sender, body)
     if name != 'unknown_user'
       unless @var[:presence][key_hash]
         @var[:presence][key_hash] = [ 'online', '' ]
-        _notice "Trusted user #{name} has connected.", 'chat'
+        if @var[:revoked].include?(name)
+          _notice "Revoked user #{name} has connected.", 'chat'
+        else
+          _notice "Trusted user #{name} has connected.", 'chat'
+          local_grant(name)
+        end
       end
-      local_grant(name) unless @var[:revoked].include?(name)
       return nil
     end
 
@@ -2371,18 +2536,20 @@ end
 
 
 # A remote user has granted us their AES key!  Let's add it to our keyring.
-# Format: "grant" <aes_iv_str> <aes_key> <peer_name> <peer_rsa_key>
+# Format: "grant" <aes_iv_str> <aes_key> <peer_name> <peer_rsa_key> <status>
 def remote_grant(sender, body)
   key_id  = AES3::iv_from_str(_pop_token(body))
   aes_key = _pop_token(body)
   peer    = _pop_token(body)
   rsa_key = _pop_token(body)
+  status  = _pop_token(body).to_s
+  status  = 'online' if status.length < 3
   key_hash = MD5::digest(rsa_key)[0,8]
 
   # Remote user's data/presence
   fingerprint = _fingerprint(key_hash)
-  _adjust_presence('online', key_hash, EMPTY_ROOM, '', false)
-  _adjust_presence('join',   key_hash, EMPTY_ROOM, '', false)
+  _adjust_presence(status, key_hash, EMPTY_ROOM, body, false)
+  _adjust_presence('join',   key_hash, EMPTY_ROOM, body, false)
 
   # Are we getting an AES key from another instance of our account?
   if key_hash == @connection.comm.our_keyhash
@@ -2460,7 +2627,7 @@ def remote_motd(sender, body)
   room = @connection.room_names[body[0,8]]
   username = _user_name(body[8,8])
   body[0,16] = ''
-  _notice "-- #{body} (#{username}) --", room
+  _notice "-- MOTD (#{username}) --\n#{body}", room
 end
 
 
@@ -2477,8 +2644,8 @@ def remote_names(sender, body)
 
   # Print the names if explicitly requested
   if @var.delete(:names_requested)
-    _notice("#{room}: #{key_hashes.collect { |x| _user_name(x) }.join('  ')}",
-            room)
+    _notice("-- Users on #{room}: --\n" + 
+            "#{key_hashes.collect { |x| _user_name(x) }.join('  ')}", room)
   end
   
   # Quietly update presence state
@@ -2553,12 +2720,10 @@ def remote_pong(sender, body)
 end
 
 
-# The chat client is starting up!
-def event_startup()
-  require 'md5'
-
-  # Generate a random AES session key first thing
-  @connection.comm.keyring.rekey!
+# This actuall gets called BEFORE startup.  The environment variables have
+# to be read before the GUI can be drawn, since the GUI depends on the
+# environment variables.
+def event_initialize_environment()
 
   # Set our defaults and then load our environment variables
   @var[:last_connection] = [ 'chat30.no-ip.org', 9000 ]
@@ -2567,7 +2732,25 @@ def event_startup()
   @var[:user_keys] = {}             # Maps usernames to full public keys
   @var[:last_ping] = Time.now       # Reset our ping counter
   @var[:timestamp] = "(%H:%M) "     # Default chat timestamp
+  @var[:special_rooms] = {}         # Don't save these, may not be actual rooms
   _load_env                         # Load previous environment variables
+
+  # Initialize a blacklist of environment variables we don't want saved
+  @var[:blacklist_env] = Array.new
+  @var[:blacklist_env].push :blacklist_env
+  @var[:blacklist_env].push :script_lines
+  @var[:blacklist_env].push :file_open_raised
+  @var[:blacklist_env].push :last_private_peer
+  @var[:blacklist_env].push :private_user
+  @var[:blacklist_env].push :granted
+  @var[:blacklist_env].push :granted_by
+  @var[:blacklist_env].push :room
+  @var[:blacklist_env].push :special_rooms
+  @var[:blacklist_env].push :away
+  @var[:blacklist_env].push :logged_in
+  @var[:blacklist_env].push :membership
+  @var[:blacklist_env].push :presence
+  @var[:blacklist_env].push :ping_request
 
   # Upgrades!  Check to see if the version in env3.yml is less than the
   # version of this file.
@@ -2579,6 +2762,16 @@ def event_startup()
     @var[:version] = _version()
     _save_env
   end
+end
+
+
+# The chat client is starting up!  At this point, the GUI is already displayed
+# and the environment variables are already loaded.
+def event_startup()
+  require 'md5'
+
+  # Generate a random AES session key first thing
+  @connection.comm.keyring.rekey!
 
   # This is where we load the user's public and private key from the env.yml
   # configuration file.  If it's not there, we spawn a helpful creation tool.
@@ -2595,22 +2788,6 @@ def event_startup()
   end
   @connection.comm.initialize_address_book(@var[:pub_rsa], @var[:prv_rsa],
                                            @var[:our_name])
-
-  # Initialize a blacklist of environment variables we don't want saved
-  @var[:blacklist_env] = Array.new
-  @var[:blacklist_env].push :blacklist_env
-  @var[:blacklist_env].push :script_lines
-  @var[:blacklist_env].push :file_open_raised
-  @var[:blacklist_env].push :last_private_peer
-  @var[:blacklist_env].push :private_user
-  @var[:blacklist_env].push :granted
-  @var[:blacklist_env].push :granted_by
-  @var[:blacklist_env].push :room
-  @var[:blacklist_env].push :away
-  @var[:blacklist_env].push :logged_in
-  @var[:blacklist_env].push :membership
-  @var[:blacklist_env].push :presence
-  @var[:blacklist_env].push :ping_request
 
   _network_init
 
@@ -2716,8 +2893,9 @@ end
 # When the user switches rooms, we need to select that tab in the GUI
 alias _guser_local_switch local_switch
 def local_switch(body)
-  _guser_local_switch(body, true)
-  @window.room_change(body)
+  if _guser_local_switch(body, true)
+    @window.room_change(body)
+  end
 end
 
 
@@ -2742,7 +2920,8 @@ end
 # and a WhiteboardPand tab is automatically created.  We also don't invite
 # other instances of ourselves - that'd be weird!
 def local_whiteboard(body)
-  room = body.dup.sub('@', '')
+  room = body.dup
+  room[0,1] = '' until room[0,1] != '@'
   return nil unless room.length >= 1
   room_hash = MD5::digest(room)[0,8]
   raise "Can't whiteboard main room" if room == 'chat' or
@@ -2750,12 +2929,57 @@ def local_whiteboard(body)
 
   # Spawn our whiteboard window
   @window.new_tab(room, WhiteboardPane)
+  @var[:special_rooms][room] = false
 
   # Connect to the room on the network
   @connection.room_names[room_hash] = room
   @connection.room_ids[room] = room_hash
   _server_control('join', room_hash)
   local_switch(room.dup)
+end
+
+
+# Select which font/size we'd like to use.  Running with no arguments spawns a
+# selection dialog.  Supply one argument to specify a font name directly, or
+# two arguments to specify a font and a size.
+def local_font(body)
+  opts_array = [ @var[:skin][:font].dup, @var[:skin][:font_size] ]
+  params = body.split
+
+  # Should we spawn a dialog?
+  if params.empty?
+    chooser = FontDialogBox.new(@fox_app, opts_array)
+    chooser.create
+    if chooser.execute(PLACEMENT_OWNER) != 1
+      return nil
+    end
+
+  # Some manual options were specified
+  else
+    opts_array[0] = params.first.dup
+    size = params[1].to_i
+    opts_array[1] = size if size >= 5
+  end
+
+  # Font options are now in opts_array
+  @var[:skin][:font]      = opts_array[0]
+  @var[:skin][:font_size] = opts_array[1]
+  @window.apply_skin(@skin)
+  _save_env
+  true    
+end
+
+
+# Select which background color we'd like
+def local_bg(body)
+  opts_array = [ "background", @var[:skin][:back_color].to_i ]
+  chooser = ColorDialogBox.new(@fox_app, opts_array)
+  chooser.create
+  if chooser.execute(PLACEMENT_OWNER) == 1
+    @var[:skin][:back_color] = opts_array[1]
+    @window.apply_skin(@skin)
+    _save_env
+  end
 end
 
 
