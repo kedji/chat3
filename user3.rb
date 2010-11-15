@@ -496,9 +496,8 @@ end
 # arguments to set an away message, no arguments to return.
 def local_away(body)
   if body.length > 0
-    @var[:away] = body
     _remote_control(nil, 'pong', "away #{body}", true)
-    #@var[:presence][@connection.comm.our_keyhash] = [ 'away', body ]
+    @var[:presence][@connection.comm.our_keyhash] = [ 'away', body ]
   else
     local_back('')
   end
@@ -507,9 +506,9 @@ end
 
 # Declare that you are back, optionally specify a greeting.
 def local_back(body)
-  return nil unless @var.delete(:away)
+  return nil if @var[:presence][@connection.comm.our_keyhash].first != 'away'
   _remote_control(nil, 'pong', "online #{body}", true)
-  #@var[:presence][@connection.comm.our_keyhash] = [ 'online', body ]
+  @var[:presence][@connection.comm.our_keyhash] = [ 'online', body ]
 end
 
 
@@ -866,7 +865,6 @@ def event_initialize_environment()
   @var[:blacklist_env].push :granted_by
   @var[:blacklist_env].push :room
   @var[:blacklist_env].push :special_rooms
-  @var[:blacklist_env].push :away
   @var[:blacklist_env].push :logged_in
   @var[:blacklist_env].push :membership
   @var[:blacklist_env].push :presence
@@ -940,7 +938,10 @@ end
 # This event gets raised every time the user sends a broadcast message
 # msg.replace() changes the message, setting it to '' precludes delivery.
 def event_outgoing_broadcast(msg)
-  local_back('') if @var[:away] and @var[:room] == 'chat'
+  if @var[:room] == 'chat' and
+     @var[:presence][@connection.comm.our_keyhash].first == 'away'
+    local_back('')
+  end
 
   # Private message?
   if @var[:room][0,1] == '@'

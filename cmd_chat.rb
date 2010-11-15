@@ -159,6 +159,7 @@ class Chat3
   def add_msg(msg, type = nil)
     ##### local message event
     puts msg
+    $stderr.flush
   end
 
   # Print an error to the screen
